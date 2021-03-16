@@ -9,7 +9,7 @@ class Model():
     def __init__(self, n_layers, epsL, epsD, approx_n=100):
         self.layers = []
         self.approx_n = approx_n
-        self.layers.append(Layer(do_conv=False))
+        # self.layers.append(Layer(do_conv=False))
         for i in range(n_layers):
             if hasattr(epsL[i], "__len__"):
                 epsL1 = epsL[i][0]

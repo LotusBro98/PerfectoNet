@@ -35,7 +35,7 @@ def show_distribution(dataset, approx_n=64):
     plt.plot(density.T)
     plt.show()
 
-def get_density(dataset, approx_n=65, sigma=2):
+def get_density(dataset, approx_n=33, sigma=2):
     dataset = np.reshape(dataset, [dataset.shape[0] * dataset.shape[1] * dataset.shape[2], dataset.shape[3]])
     density = np.zeros((dataset.shape[-1], approx_n,))
     mean = np.average(dataset, axis=0)
@@ -57,23 +57,23 @@ def get_gaussian_channels(density, sigma=2, eps=-1):
     kern1d /= np.sum(kern1d)
 
     gaussian_diff = density - np.expand_dims(kern1d, axis=0)
-    gaussian_diff = np.sqrt(np.average(np.square(gaussian_diff), axis=-1))
-
-    plt.plot(np.sort(np.log(gaussian_diff)))
-    plt.plot(np.ones_like(gaussian_diff) * eps)
-    plt.show()
+    gaussian_diff = (np.average(np.abs(gaussian_diff), axis=-1))
+    gaussian_diff = np.log(gaussian_diff)
 
     indices = np.argsort(gaussian_diff)
-    n_channels = np.count_nonzero(np.log(gaussian_diff) <= eps)
-    # if invert:
-    #     indices = indices[n_channels:]
-    # else:
-    #     indices = indices[:n_channels]
 
-    # print(indices)
-    # plt.plot(kern1d)
-    # plt.plot(density[:10].T)
-    # plt.show()
+    gaussian_diff = np.sort(gaussian_diff)
+    m, M = gaussian_diff[0], gaussian_diff[-1]
+    gaussian_diff = (gaussian_diff - m) / (M - m)
+    # gaussian_diff = np.cumsum(gaussian_diff)
+    # gaussian_diff /= gaussian_diff[-1]
+    plt.plot(gaussian_diff)
+    # plt.plot(np.ones_like(gaussian_diff) * eps)
+    plt.plot([eps * (density.shape[0]-1)] * 2, [0, 1])
+    plt.show()
+
+    # n_channels = np.count_nonzero(gaussian_diff <= eps)
+    n_channels = int(math.ceil(density.shape[0] * eps))
 
     return indices, n_channels
 

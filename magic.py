@@ -6,29 +6,26 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 
-from distribution import remap_distribution, build_distribution
+from distribution import *
 from layer import Layer
 from model import Model
 
-SIZE = 127
-DATASET_SIZE = 100
+SIZE = 63
+DATASET_SIZE = 1800
 BATCH_SIZE = 4
 TEST_SIZE = 4
 EPS_START = -8
 EPS_END = 1
 EPS_L = 1
 ALPHA = 1
-# EPS = np.linspace(EPS_START, EPS_END, 5)
-# EPS = [-8, -8, -6, 0, 0][:5]
-# EPS = [(-4, -1), -1.5, -1, -1, -1, -1]
-# EPS = [-4, -4, -4, -4, -4]
-# EPS = [-3, -1.5, -1.5, -1.5, -1.5]
-# EPS = np.linspace(-4, 0, 5)
-EPS1 = [(-4, -4), (-4, -4), -4, -4, -4, -4]# (-6.6, -6.1)]#, ((False, -6), (False, -6))]
-EPS2 = [(-3, -4), (-4, -4), -4, -4, -4, -4]#, (-6.6, -6.1)]#, ((False, -6), (False, -6))]
-# EPS = [0.002] * 5
-EPS_L_A = 2
-EPS_L_B = 2
+
+EPS1 = [(-4, -3), -3, -2, 0, 2]
+EPS2 = [(1, 0.7), 0.7, 1, 1, 1]
+
+EPS_L_A = 3
+EPS_D_A = 1
+EPS_L_B = 3
+EPS_D_B = 1
 DISTRIBUTION_APPROX_N = 64
 
 
@@ -77,70 +74,91 @@ def get_nearest(dataset, subset):
     return near
 
 
-model = Model(len(EPS1), EPS1, EPS2, approx_n=DISTRIBUTION_APPROX_N)
+model = Model(len(EPS2), EPS1, EPS2, approx_n=DISTRIBUTION_APPROX_N)
 model.fit(inp, BATCH_SIZE)
 
 x = model.forward(inp, BATCH_SIZE)
 
-# x_A0 = x[:DATASET_SIZE]
-# x_B0 = x[DATASET_SIZE:2*DATASET_SIZE]
+x_A0 = x[:DATASET_SIZE]
+x_B0 = x[DATASET_SIZE:2*DATASET_SIZE]
 # all_std = np.std(x, axis=(0,1,2))
-#
-# project_A = Layer(ksize=1, stride=1, eps=EPS_L_A)
-# xsA, ysA = build_distribution(x_A0, equal=True)#, weights=all_std)
-# # project_A.fit(remap_distribution(x_A0, xsA, ysA))
-# project_A.fit(x_A0)
-#
-# project_B = Layer(ksize=1, stride=1, eps=EPS_L_B)
-# xsB, ysB = build_distribution(x_B0, equal=True)#, weights=all_std)
-# # project_B.fit(remap_distribution(x_B0, xsB, ysB))
-# project_B.fit(x_B0)
-#
-# x_A = remap_distribution(x_A0, xsA, ysA)
-# x_A = remap_distribution(x_A, ysB, xsB)
-# x_A_B = project_B.forward(x_A)
-# print("x_A->B: {}".format(x_A_B.shape))
+
+project_A = Layer(ksize=1, stride=1, epsL=EPS_L_A, epsD=EPS_D_A)
+xsA, ysA = build_distribution(x_A0, equal=True)#, weights=all_std)
+# project_A.fit(remap_distribution(x_A0, xsA, ysA))
+project_A.fit(x_A0)
+
+project_B = Layer(ksize=1, stride=1, epsL=EPS_L_B, epsD=EPS_D_B)
+xsB, ysB = build_distribution(x_B0, equal=True)#, weights=all_std)
+# project_B.fit(remap_distribution(x_B0, xsB, ysB))
+project_B.fit(x_B0)
+
+avgA = np.average(x_A0, axis=(0,1,2))
+stdA = np.std(x_A0, axis=(0,1,2))
+# print(avgA)
+# print(stdA)
+# normA = np.sqrt(np.average(np.square(np.linalg.norm(x_A0 - avgA, axis=-1))))
+# print(normA)
+
+avgB = np.average(x_B0, axis=(0,1,2))
+stdB = np.std(x_B0, axis=(0,1,2))
+# print(avgB)
+# print(stdB)
+# normB = np.sqrt(np.average(np.square(np.linalg.norm(x_B0 - avgB, axis=-1))))
+# print(normB)
+
+x_A = remap_distribution(x_A0, xsA, ysA)
+x_A = remap_distribution(x_A, ysB, xsB)
+x_A_B = project_B.forward(x_A)
+print("x_A->B: {}".format(x_A_B.shape))
 # x_A = project_B.backward(x_A_B)
 # xsA_B, ys_A_B = build_distribution(x_A, equal=True)
-#
-# x_B = remap_distribution(x_B0, xsB, ysB)
-# x_B = remap_distribution(x_B, ysA, xsA)
-# x_B_A = project_A.forward(x_B)
-# print("x_B->A: {}".format(x_B_A.shape))
+
+x_B = remap_distribution(x_B0, xsB, ysB)
+x_B = remap_distribution(x_B, ysA, xsA)
+x_B_A = project_A.forward(x_B)
+print("x_B->A: {}".format(x_B_A.shape))
 # x_B = project_A.backward(x_B_A)
 # xsB_A, ysB_A = build_distribution(x_B, equal=True)
-#
-#
-# x = x[2*DATASET_SIZE:]
-# inp = np.concatenate([inp[:1], inp[2*DATASET_SIZE:2*DATASET_SIZE+TEST_SIZE], inp[DATASET_SIZE:DATASET_SIZE+1], inp[2*DATASET_SIZE+TEST_SIZE:]], axis=0)
-#
-# x_A = x[:TEST_SIZE]
-# x_B = x[TEST_SIZE:]
-#
-# x_A = remap_distribution(x_A, xsA, ysA)
-# x_A = remap_distribution(x_A, ysB, xsB)
-# x_A = project_B.forward(x_A)
-# x_A = project_B.backward(x_A)
+
+
+x = x[2*DATASET_SIZE:]
+inp = np.concatenate([inp[:1], inp[2*DATASET_SIZE:2*DATASET_SIZE+TEST_SIZE], inp[DATASET_SIZE:DATASET_SIZE+1], inp[2*DATASET_SIZE+TEST_SIZE:]], axis=0)
+
+x_A = x[:TEST_SIZE]
+x_B = x[TEST_SIZE:]
+
+x_A = remap_distribution(x_A, xsA, ysA)
+x_A = remap_distribution(x_A, ysB, xsB)
+# x_A = (x_A - avgA) / stdA * stdB + avgB
+for i in range(4):
+    x_A = project_B.forward(x_A)
+    x_A = project_B.backward(x_A)
+#     x_A -= avgB
+#     norm = np.linalg.norm(x_A, axis=-1, keepdims=True)
+#     x_A = x_A / norm * normB
+#     x_A += avgB
 # x_A = remap_distribution(x_A, xsA_B, ys_A_B)
 # x_A = remap_distribution(x_A, ysB, xsB)
-# x_A = project_B.forward(x_A)
+# x_A = project_A.forward(x_A)
 # x_A = project_B.backward(x_A)
-# near_A = get_nearest(x_B0, x_A)
-# x_A = x_A * ALPHA + near_A * (1 - ALPHA)
-#
-#
-# x_B = remap_distribution(x_B, xsB, ysB)
-# x_B = remap_distribution(x_B, ysA, xsA)
-# x_B = project_A.forward(x_B)
-# x_B = project_A.backward(x_B)
+
+x_B = remap_distribution(x_B, xsB, ysB)
+x_B = remap_distribution(x_B, ysA, xsA)
+# x_B = (x_B - avgB) / stdB * stdA + avgA
+for i in range(4):
+    x_B = project_A.forward(x_B)
+    x_B = project_A.backward(x_B)
+#     x_B -= avgA
+#     norm = np.linalg.norm(x_B, axis=-1, keepdims=True)
+#     x_B = x_B / norm * normA
+#     x_B += avgA
 # x_B = remap_distribution(x_B, xsB_A, ysB_A)
 # x_B = remap_distribution(x_B, ysA, xsA)
-# x_B = project_A.forward(x_B)
+# x_B = project_B.forward(x_B)
 # x_B = project_A.backward(x_B)
-# near_B = get_nearest(x_A0, x_B)
-# x_B = x_B * ALPHA + near_B * (1 - ALPHA)
-#
-# x = np.concatenate([x_A0[:1], x_A, x_B0[:1], x_B], axis=0)
+
+x = np.concatenate([x_A0[:1], x_A, x_B0[:1], x_B], axis=0)
 
 x = model.backward(x, BATCH_SIZE)
 
