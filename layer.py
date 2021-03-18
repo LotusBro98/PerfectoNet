@@ -61,28 +61,30 @@ class Layer():
 
             if self.allow_reduce:
                 x = self.forward(dataset, batch_size, do_remap=False)
-
                 # show_distribution(x)
-                density, mean, std = get_density(x)
-                take_channels, n_features = get_gaussian_channels(density, eps=self.epsD)
+                # show_common_distributions(x)
+                # density, mean, std = get_density(x)
+                # take_channels, n_features = get_gaussian_channels(density, eps=self.epsD)
+                take_channels, n_features = get_non_peak_channels(x, eps=self.epsD)
 
                 self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
                 self.kernel_forward = np.take(self.kernel_forward, take_channels, axis=-1)
                 self.kernel_backward = np.take(self.kernel_backward, take_channels, axis=-1)
-                density = np.take(density, take_channels, axis=0)
-                mean = np.take(mean, take_channels, axis=0)
-                std = np.take(std, take_channels, axis=0)
+                # density = np.take(density, take_channels, axis=0)
+                # mean = np.take(mean, take_channels, axis=0)
+                # std = np.take(std, take_channels, axis=0)
                 # x = np.take(x, take_channels, axis=-1)
-
-                if n_features < x.shape[-1]:
-                    default_after = get_most_probable_values(density[n_features:], mean[n_features:], std[n_features:])
-                    default_after = np.concatenate([np.zeros((n_features,)), default_after], axis=0)
-                else:
-                    default_after = np.zeros((x.shape[-1],))
-
-                default_before = np.matmul(self.kernel_backward, default_after)
-
-                self.bias_backward += np.expand_dims(default_before, axis=-1) / np.expand_dims(self.get_mask(), axis=(-1,-2))
+                #
+                # if n_features < x.shape[-1]:
+                #     # default_after = get_most_probable_values(density[n_features:], mean[n_features:], std[n_features:])
+                #     default_after = get_most_probable_values(x[:,:,:,n_features:])
+                #     default_after = np.concatenate([np.zeros((n_features,)), default_after], axis=0)
+                # else:
+                #     default_after = np.zeros((x.shape[-1],))
+                #
+                # default_before = np.matmul(self.kernel_backward, default_after)
+                #
+                # self.bias_backward += np.expand_dims(default_before, axis=-1) / np.expand_dims(self.get_mask(), axis=(-1,-2))
                 self.bias_forward = self.bias_forward[:n_features]
                 self.kernel_forward = self.kernel_forward[:,:,:,:n_features]
                 self.kernel_backward = self.kernel_backward[:,:,:,:n_features]
@@ -233,9 +235,9 @@ class Layer():
         # Ss = S / np.sum(S)
         # Ss = np.sqrt(np.cumsum(Ss))
         thresh = self.epsL
-        # plt.plot(Ss)
-        # plt.plot(np.ones_like(Ss) * thresh)
-        # plt.show()
+        plt.plot(Ss)
+        plt.plot(np.ones_like(Ss) * thresh)
+        plt.show()
         n_features = (tf.math.count_nonzero(Ss > thresh)) if self.channels is None else self.channels
         if (not self.allow_reduce) and n_features < Cin:
             n_features = Cin

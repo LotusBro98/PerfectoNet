@@ -10,8 +10,8 @@ from distribution import *
 from layer import Layer
 from model import Model
 
-SIZE = 63
-DATASET_SIZE = 1800
+SIZE = 127
+DATASET_SIZE = 1000
 BATCH_SIZE = 4
 TEST_SIZE = 4
 EPS_START = -8
@@ -19,13 +19,17 @@ EPS_END = 1
 EPS_L = 1
 ALPHA = 1
 
-EPS1 = [(-4, -3), -3, -2, 0, 2]
-EPS2 = [(1, 0.7), 0.7, 1, 1, 1]
+N_LAYERS = 6
 
-EPS_L_A = 3
-EPS_D_A = 1
-EPS_L_B = 3
-EPS_D_B = 1
+EPS1 = np.linspace(-6, -1, 6)
+EPS2 = [0.15] * 6
+# EPS1 = -4
+# EPS2 = 0.12
+
+EPS_L_A = 6
+EPS_D_A = 0.06
+EPS_L_B = 6
+EPS_D_B = 0.06
 DISTRIBUTION_APPROX_N = 64
 
 
@@ -74,7 +78,7 @@ def get_nearest(dataset, subset):
     return near
 
 
-model = Model(len(EPS2), EPS1, EPS2, approx_n=DISTRIBUTION_APPROX_N)
+model = Model(N_LAYERS, EPS1, EPS2, approx_n=DISTRIBUTION_APPROX_N)
 model.fit(inp, BATCH_SIZE)
 
 x = model.forward(inp, BATCH_SIZE)
@@ -97,14 +101,14 @@ avgA = np.average(x_A0, axis=(0,1,2))
 stdA = np.std(x_A0, axis=(0,1,2))
 # print(avgA)
 # print(stdA)
-# normA = np.sqrt(np.average(np.square(np.linalg.norm(x_A0 - avgA, axis=-1))))
+normA = np.sqrt(np.average(np.square(np.linalg.norm(x_A0 - avgA, axis=-1))))
 # print(normA)
 
 avgB = np.average(x_B0, axis=(0,1,2))
 stdB = np.std(x_B0, axis=(0,1,2))
 # print(avgB)
 # print(stdB)
-# normB = np.sqrt(np.average(np.square(np.linalg.norm(x_B0 - avgB, axis=-1))))
+normB = np.sqrt(np.average(np.square(np.linalg.norm(x_B0 - avgB, axis=-1))))
 # print(normB)
 
 x_A = remap_distribution(x_A0, xsA, ysA)
@@ -131,13 +135,13 @@ x_B = x[TEST_SIZE:]
 x_A = remap_distribution(x_A, xsA, ysA)
 x_A = remap_distribution(x_A, ysB, xsB)
 # x_A = (x_A - avgA) / stdA * stdB + avgB
-for i in range(4):
+for i in range(16):
     x_A = project_B.forward(x_A)
     x_A = project_B.backward(x_A)
-#     x_A -= avgB
-#     norm = np.linalg.norm(x_A, axis=-1, keepdims=True)
-#     x_A = x_A / norm * normB
-#     x_A += avgB
+    x_A -= avgB
+    norm = np.linalg.norm(x_A, axis=-1, keepdims=True)
+    x_A = x_A / norm * normB
+    x_A += avgB
 # x_A = remap_distribution(x_A, xsA_B, ys_A_B)
 # x_A = remap_distribution(x_A, ysB, xsB)
 # x_A = project_A.forward(x_A)
@@ -146,13 +150,13 @@ for i in range(4):
 x_B = remap_distribution(x_B, xsB, ysB)
 x_B = remap_distribution(x_B, ysA, xsA)
 # x_B = (x_B - avgB) / stdB * stdA + avgA
-for i in range(4):
+for i in range(16):
     x_B = project_A.forward(x_B)
     x_B = project_A.backward(x_B)
-#     x_B -= avgA
-#     norm = np.linalg.norm(x_B, axis=-1, keepdims=True)
-#     x_B = x_B / norm * normA
-#     x_B += avgA
+    x_B -= avgA
+    norm = np.linalg.norm(x_B, axis=-1, keepdims=True)
+    x_B = x_B / norm * normA
+    x_B += avgA
 # x_B = remap_distribution(x_B, xsB_A, ysB_A)
 # x_B = remap_distribution(x_B, ysA, xsA)
 # x_B = project_B.forward(x_B)
@@ -167,8 +171,8 @@ outp = x
 inp[:TEST_SIZE+1] = remap_distribution(inp[:TEST_SIZE+1], ysA0, xsA0)
 inp[TEST_SIZE+1:] = remap_distribution(inp[TEST_SIZE+1:], ysB0, xsB0)
 
-outp[:TEST_SIZE+1] = remap_distribution(outp[:TEST_SIZE+1], ysA0, xsA0)
-outp[TEST_SIZE+1:] = remap_distribution(outp[TEST_SIZE+1:], ysB0, xsB0)
+outp[:TEST_SIZE+1] = remap_distribution(outp[:TEST_SIZE+1], ysB0, xsB0)
+outp[TEST_SIZE+1:] = remap_distribution(outp[TEST_SIZE+1:], ysA0, xsA0)
 
 f, ax = plt.subplots(2, 2*(TEST_SIZE+1), figsize=(10*TEST_SIZE, 10))
 

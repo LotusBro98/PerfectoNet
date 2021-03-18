@@ -27,6 +27,7 @@ class Model():
 
             # self.layers.append(Layer(ksize=2, stride=1, eps=eps1, distribution_approx_n=approx_n))
             # self.layers.append(Layer(ksize=2, stride=2, eps=eps2, distribution_approx_n=approx_n))
+            # epsL_i = epsL if i > 0 else -8
 
             self.layers.append(Layer(ksize=3, stride=2, orient="ver", epsL=epsL1, epsD=epsD1, distribution_approx_n=approx_n))
             self.layers.append(Layer(ksize=3, stride=2, orient="hor", epsL=epsL2, epsD=epsD2, distribution_approx_n=approx_n))
