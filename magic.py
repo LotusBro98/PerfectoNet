@@ -21,8 +21,9 @@ ALPHA = 1
 
 N_LAYERS = 6
 
-EPS1 = np.linspace(-3, 0, 6)
-EPS2 = np.linspace(0.2, 0.1, 6)
+EPS1 = np.linspace(-4, 1.4, N_LAYERS)
+
+EPS2 = np.linspace(0.5, 0.2, N_LAYERS)
 # EPS1 = -4
 # EPS2 = 0.12
 
@@ -168,11 +169,15 @@ x = model.backward(x, BATCH_SIZE)
 
 outp = x
 
-inp[:TEST_SIZE+1] = remap_distribution(inp[:TEST_SIZE+1], ysA0, xsA0)
-inp[TEST_SIZE+1:] = remap_distribution(inp[TEST_SIZE+1:], ysB0, xsB0)
+inp[:1] = remap_distribution(inp[:1], ysA0, xsA0)
+inp[1:TEST_SIZE+1] = remap_distribution(inp[1:TEST_SIZE+1], ysA0, xsA0)
+inp[TEST_SIZE+1:TEST_SIZE+2] = remap_distribution(inp[TEST_SIZE+1:TEST_SIZE+2], ysB0, xsB0)
+inp[TEST_SIZE+2:] = remap_distribution(inp[TEST_SIZE+2:], ysB0, xsB0)
 
-outp[:TEST_SIZE+1] = remap_distribution(outp[:TEST_SIZE+1], ysB0, xsB0)
-outp[TEST_SIZE+1:] = remap_distribution(outp[TEST_SIZE+1:], ysA0, xsA0)
+outp[:1] = remap_distribution(outp[:1], ysA0, xsA0)
+outp[1:TEST_SIZE+1] = remap_distribution(outp[1:TEST_SIZE+1], ysB0, xsB0)
+outp[TEST_SIZE+1:TEST_SIZE+2] = remap_distribution(outp[TEST_SIZE+1:TEST_SIZE+2], ysB0, xsB0)
+outp[TEST_SIZE+2:] = remap_distribution(outp[TEST_SIZE+2:], ysA0, xsA0)
 
 f, ax = plt.subplots(2, 2*(TEST_SIZE+1), figsize=(10*TEST_SIZE, 10))
 

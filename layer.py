@@ -69,14 +69,14 @@ class Layer():
                 # density, mean, std = get_density(x)
                 # take_channels, n_features = get_gaussian_channels(density, eps=self.epsD)
                 take_channels, n_features = get_mean_std_by_peak(x, eps=self.epsL)
-                take_channels = take_channels[:n_features]
-
-                x1 = np.take(x, take_channels, axis=-1)
-
-                take_channels1, n_features = get_non_peak_channels(x1, eps=self.epsD)
-                take_channels1 = take_channels1[:n_features]
-
-                take_channels = np.take(take_channels, take_channels1)
+                # take_channels = take_channels[:n_features]
+                #
+                # x1 = np.take(x, take_channels, axis=-1)
+                #
+                # take_channels1, n_features = get_non_peak_channels(x1, eps=self.epsD)
+                # take_channels1 = take_channels1[:n_features]
+                #
+                # take_channels = np.take(take_channels, take_channels1)
 
                 self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
                 self.kernel_forward = np.take(self.kernel_forward, take_channels, axis=-1)
