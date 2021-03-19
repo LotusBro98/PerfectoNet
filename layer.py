@@ -54,18 +54,29 @@ class Layer():
     def fit(self, dataset, batch_size=1):
         if self.do_conv:
             K, K_T, bias_forward, bias_backward, n_features = self._get_optimal_conv_kernel(dataset)
-            self.kernel_forward = K[:,:,:,:n_features]
-            self.kernel_backward = K_T[:,:,:,:n_features]
-            self.bias_forward = bias_forward[:n_features]
+            self.kernel_forward = K#[:,:,:,:n_features]
+            self.kernel_backward = K_T#[:,:,:,:n_features]
+            self.bias_forward = bias_forward#[:n_features]
             self.bias_backward = bias_backward
 
             if self.allow_reduce:
                 x = self.forward(dataset, batch_size, do_remap=False)
+
+
+
                 # show_distribution(x)
                 # show_common_distributions(x)
                 # density, mean, std = get_density(x)
                 # take_channels, n_features = get_gaussian_channels(density, eps=self.epsD)
-                take_channels, n_features = get_non_peak_channels(x, eps=self.epsD)
+                take_channels, n_features = get_mean_std_by_peak(x, eps=self.epsL)
+                take_channels = take_channels[:n_features]
+
+                x1 = np.take(x, take_channels, axis=-1)
+
+                take_channels1, n_features = get_non_peak_channels(x1, eps=self.epsD)
+                take_channels1 = take_channels1[:n_features]
+
+                take_channels = np.take(take_channels, take_channels1)
 
                 self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
                 self.kernel_forward = np.take(self.kernel_forward, take_channels, axis=-1)
@@ -73,7 +84,7 @@ class Layer():
                 # density = np.take(density, take_channels, axis=0)
                 # mean = np.take(mean, take_channels, axis=0)
                 # std = np.take(std, take_channels, axis=0)
-                # x = np.take(x, take_channels, axis=-1)
+
                 #
                 # if n_features < x.shape[-1]:
                 #     # default_after = get_most_probable_values(density[n_features:], mean[n_features:], std[n_features:])
@@ -235,9 +246,9 @@ class Layer():
         # Ss = S / np.sum(S)
         # Ss = np.sqrt(np.cumsum(Ss))
         thresh = self.epsL
-        plt.plot(Ss)
-        plt.plot(np.ones_like(Ss) * thresh)
-        plt.show()
+        # plt.plot(Ss)
+        # plt.plot(np.ones_like(Ss) * thresh)
+        # plt.show()
         n_features = (tf.math.count_nonzero(Ss > thresh)) if self.channels is None else self.channels
         if (not self.allow_reduce) and n_features < Cin:
             n_features = Cin

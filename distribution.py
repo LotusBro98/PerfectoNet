@@ -92,6 +92,42 @@ def get_non_peak_channels(dataset, sigma=0.05, eps=0.1):
     n_channels = np.count_nonzero(count < eps)
     return indices, n_channels
 
+
+def get_mean_std_by_peak(dataset, eps=0.1, sigma=1, approx_n=64):
+    dataset = np.reshape(dataset, [dataset.shape[0] * dataset.shape[1] * dataset.shape[2], dataset.shape[3]])
+    mean = np.average(dataset, axis=0)
+    std = np.std(dataset, axis=0)
+    peak_std = np.zeros_like(std)
+    for n in range(dataset.shape[-1]):
+        m, M = mean[n] - sigma * std[n], mean[n] + sigma * std[n]
+        peak_std[n] = np.std(dataset[(dataset[:, n] >= m) * (dataset[:, n] < M), n])
+
+    peak_std = peak_std * std[0] / peak_std[0]
+    indices = np.argsort(peak_std)[::-1]
+    n_channels = np.count_nonzero(np.log(peak_std) >= eps)
+    # print(peak_std)
+
+    # density = np.zeros((dataset.shape[-1], approx_n,))
+    # for n in range(dataset.shape[-1]):
+    #     checks = np.linspace(mean[n] - peak_std[n], mean[n] + peak_std[n], approx_n + 1)
+    #     for i in range(0, approx_n):
+    #         count = np.count_nonzero((dataset[:, n] >= checks[i]) * (dataset[:, n] < checks[i + 1]))
+    #         density[n, i] = count
+    #
+    # density = density[:, 1:-1]
+    # density /= np.sum(density, axis=-1, keepdims=True)
+    #
+    # plt.plot(density.T)
+    # plt.show()
+
+    # plt.plot(np.sort(np.log(peak_std))[::-1])
+    # plt.plot(np.sort(np.log(std))[::-1])
+    # plt.plot(np.ones_like(peak_std) * eps)
+    # plt.show()
+
+    return indices, n_channels
+
+
 def build_distribution(dataset, approx_n=100, equal=True, weights=None):
     dataset = np.reshape(dataset, [dataset.shape[0] * dataset.shape[1] * dataset.shape[2], dataset.shape[3]])
     dataset = np.sort(dataset, axis=0)

@@ -11,7 +11,7 @@ from layer import Layer
 from model import Model
 
 SIZE = 127
-DATASET_SIZE = 1000
+DATASET_SIZE = 500
 BATCH_SIZE = 4
 TEST_SIZE = 4
 EPS_START = -8
@@ -21,14 +21,14 @@ ALPHA = 1
 
 N_LAYERS = 6
 
-EPS1 = np.linspace(-6, -1, 6)
-EPS2 = [0.15] * 6
+EPS1 = np.linspace(-3, 0, 6)
+EPS2 = np.linspace(0.2, 0.1, 6)
 # EPS1 = -4
 # EPS2 = 0.12
 
-EPS_L_A = 6
+EPS_L_A = 4
 EPS_D_A = 0.06
-EPS_L_B = 6
+EPS_L_B = 4
 EPS_D_B = 0.06
 DISTRIBUTION_APPROX_N = 64
 
