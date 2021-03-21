@@ -8,15 +8,12 @@ import matplotlib.pyplot as plt
 from distribution import *
 
 class Layer():
-    def __init__(self, ksize=3, stride=2, orient="both", epsL=0.1, epsD=0.1, distribution_approx_n=100, channels=None, allow_reduce=True, do_conv=True, equalize=False):
+    def __init__(self, ksize=3, stride=2, orient="both", eps=1e-2, distribution_approx_n=100, channels=None, equalize=False):
         self.ksize = ksize
         self.stride = stride
-        self.epsL = epsL
-        self.epsD = epsD
+        self.eps = eps
         self.channels = channels
         self.distribution_approx_n = distribution_approx_n
-        self.allow_reduce=allow_reduce
-        self.do_conv = do_conv
         self.orient = orient
         self.equalize = equalize
         pass
@@ -52,63 +49,47 @@ class Layer():
         return mask
 
     def fit(self, dataset, batch_size=1):
-        if self.do_conv:
-            K, K_T, bias_forward, bias_backward, n_features = self._get_optimal_conv_kernel(dataset)
-            self.kernel_forward = K#[:,:,:,:n_features]
-            self.kernel_backward = K_T#[:,:,:,:n_features]
-            self.bias_forward = bias_forward#[:n_features]
-            self.bias_backward = bias_backward
-
-            if self.allow_reduce:
-                x = self.forward(dataset, batch_size, do_remap=False)
-
-
-
-                # show_distribution(x)
-                # show_common_distributions(x)
-                # density, mean, std = get_density(x)
-                # take_channels, n_features = get_gaussian_channels(density, eps=self.epsD)
-                take_channels, n_features = get_mean_std_by_peak(x, eps=self.epsL)
-                # take_channels = take_channels[:n_features]
-                #
-                # x1 = np.take(x, take_channels, axis=-1)
-                #
-                # take_channels1, n_features = get_non_peak_channels(x1, eps=self.epsD)
-                # take_channels1 = take_channels1[:n_features]
-                #
-                # take_channels = np.take(take_channels, take_channels1)
-
-                self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
-                self.kernel_forward = np.take(self.kernel_forward, take_channels, axis=-1)
-                self.kernel_backward = np.take(self.kernel_backward, take_channels, axis=-1)
-                # density = np.take(density, take_channels, axis=0)
-                # mean = np.take(mean, take_channels, axis=0)
-                # std = np.take(std, take_channels, axis=0)
-
-                #
-                # if n_features < x.shape[-1]:
-                #     # default_after = get_most_probable_values(density[n_features:], mean[n_features:], std[n_features:])
-                #     default_after = get_most_probable_values(x[:,:,:,n_features:])
-                #     default_after = np.concatenate([np.zeros((n_features,)), default_after], axis=0)
-                # else:
-                #     default_after = np.zeros((x.shape[-1],))
-                #
-                # default_before = np.matmul(self.kernel_backward, default_after)
-                #
-                # self.bias_backward += np.expand_dims(default_before, axis=-1) / np.expand_dims(self.get_mask(), axis=(-1,-2))
-                self.bias_forward = self.bias_forward[:n_features]
-                self.kernel_forward = self.kernel_forward[:,:,:,:n_features]
-                self.kernel_backward = self.kernel_backward[:,:,:,:n_features]
-
-        # x = self.forward(dataset, batch_size, do_remap=False)
-
-        # xs, ys = build_distribution(x, self.distribution_approx_n)
-        # self.xs = xs
-        # self.ys = ys
-
         self.input_shape = dataset.shape
 
-    def forward(self, x, batch_size=1, do_remap=True):
+        K, K_T, bias_forward, bias_backward = self._get_optimal_conv_kernel(dataset)
+        self.kernel_forward = K
+        self.kernel_backward = K_T
+        self.bias_forward = bias_forward
+        self.bias_backward = bias_backward
+
+        print("Processing dataset ...")
+        x = self.forward(dataset, batch_size, do_remap=False)
+
+        print("Counting std ...")
+        peak_std = get_std_by_peak(x)
+        take_channels = np.argsort(peak_std)[::-1]
+        collect_std = np.sqrt(np.cumsum(np.square(np.sort(peak_std))))
+        n_features = np.count_nonzero(collect_std >= self.eps) if self.channels is None else self.channels
+
+        self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
+        self.kernel_forward = np.take(self.kernel_forward, take_channels, axis=-1)
+        self.kernel_backward = np.take(self.kernel_backward, take_channels, axis=-1)
+        x = np.take(x, take_channels, axis=-1)
+        self.channel_std = np.take(peak_std, take_channels, axis=-1)
+
+        # if n_features < x.shape[-1]:
+        #     default_after = get_most_probable_values(x[:,:,:,n_features:])
+        #     default_after = np.concatenate([np.zeros((n_features,)), default_after], axis=0)
+        # else:
+        #     default_after = np.zeros((x.shape[-1],))
+        #
+        # default_before = np.matmul(self.kernel_backward, default_after)
+        # self.bias_backward += np.expand_dims(default_before, axis=-1) / np.expand_dims(self.get_mask(), axis=(-1,-2))
+
+        self.bias_forward = self.bias_forward[:n_features]
+        self.kernel_forward = self.kernel_forward[:, :, :, :n_features]
+        self.kernel_backward = self.kernel_backward[:, :, :, :n_features]
+        x = x[:,:,:,:n_features]
+        self.channel_std = self.channel_std[:n_features]
+
+        return x
+
+    def forward(self, x, batch_size=1, do_remap=True, dropout=0.01):
         if self.orient == "both":
             stride = (self.stride, self.stride)
         elif self.orient == "hor":
@@ -116,20 +97,21 @@ class Layer():
         elif self.orient == "ver":
             stride = (self.stride, 1)
 
-        if self.do_conv:
-            x_conv = []
-            for i in range(0, x.shape[0], batch_size):
-                batch = x[i: i + batch_size]
-                batch = tf.nn.conv2d(
-                    batch, self.kernel_forward,
-                    (1, stride[0], stride[1], 1),
-                    padding="VALID") + self.bias_forward
-                batch = batch.numpy()
-                x_conv.append(batch)
-            x = np.concatenate(x_conv, axis=0)
+        x_conv = []
+        for i in range(0, x.shape[0], batch_size):
+            batch = x[i: i + batch_size]
+            batch = tf.nn.conv2d(
+                batch, self.kernel_forward,
+                (1, stride[0], stride[1], 1),
+                padding="VALID") + self.bias_forward
+            batch = batch.numpy()
+            x_conv.append(batch)
+        x = np.concatenate(x_conv, axis=0)
 
-        # if do_remap:
-        #     x = remap_distribution(x, self.xs, self.ys)
+        if hasattr(self, "peak_std") and self.channel_std is not None:
+            sigma = scipy.special.erfinv(1 - dropout) * np.sqrt(2)
+            x[np.abs(x) > sigma * self.channel_std] = 0
+
         return x
 
     def backward(self, x, batch_size=1):
@@ -140,35 +122,32 @@ class Layer():
         elif self.orient == "ver":
             stride = (self.stride, 1)
 
-        # x = remap_distribution(x, self.ys, self.xs)
-
         b, h, w, c = self.input_shape
-        if self.do_conv:
-            x_conv = []
-            for i in range(0, x.shape[0], batch_size):
-                batch0 = x[i: i + batch_size]
-                batch = tf.nn.conv2d_transpose(
-                    batch0, self.kernel_backward, (batch0.shape[0], h, w, c),
-                    (1, stride[0], stride[1], 1), padding="VALID")
-                bias = tf.nn.conv2d_transpose(
-                    tf.ones_like(batch0[:,:,:,:1]), self.bias_backward, (batch0.shape[0], h, w, c),
-                    (1, stride[0], stride[1], 1), padding="VALID")
-                batch += bias
-                batch = batch.numpy()
-                x_conv.append(batch)
-            x = np.concatenate(x_conv, axis=0)
-            if self.ksize == 3 and self.stride == 2:
-                if self.orient in ["both", "ver"]:
-                    x[:, 0, :, :] *= 2
-                    x[:, -1, :, :] *= 2
-                if self.orient in ["both", "hor"]:
-                    x[:, :, 0, :] *= 2
-                    x[:, :, -1, :] *= 2
-            if self.ksize == 2 and self.stride == 1:
+        x_conv = []
+        for i in range(0, x.shape[0], batch_size):
+            batch0 = x[i: i + batch_size]
+            batch = tf.nn.conv2d_transpose(
+                batch0, self.kernel_backward, (batch0.shape[0], h, w, c),
+                (1, stride[0], stride[1], 1), padding="VALID")
+            bias = tf.nn.conv2d_transpose(
+                tf.ones_like(batch0[:,:,:,:1]), self.bias_backward, (batch0.shape[0], h, w, c),
+                (1, stride[0], stride[1], 1), padding="VALID")
+            batch += bias
+            batch = batch.numpy()
+            x_conv.append(batch)
+        x = np.concatenate(x_conv, axis=0)
+        if self.ksize == 3 and self.stride == 2:
+            if self.orient in ["both", "ver"]:
                 x[:, 0, :, :] *= 2
                 x[:, -1, :, :] *= 2
+            if self.orient in ["both", "hor"]:
                 x[:, :, 0, :] *= 2
                 x[:, :, -1, :] *= 2
+        if self.ksize == 2 and self.stride == 1:
+            x[:, 0, :, :] *= 2
+            x[:, -1, :, :] *= 2
+            x[:, :, 0, :] *= 2
+            x[:, :, -1, :] *= 2
         return x
 
     def _get_optimal_conv_kernel(self, dataset, batch_size_cells=100000000):
@@ -238,41 +217,27 @@ class Layer():
         print("SV Decomposition running...")
         U, S, V = np.linalg.svd(M)
 
-        # Ss = np.square(np.cumsum(S))
-        # Ss /= Ss[-1]
-        # Ss = 1 - Ss
-        Ss = np.log(S)
-        # Ss = np.sqrt(S / np.max(S))
-        # Ss = S / np.sum(S)
-        # Ss = np.sqrt(np.cumsum(Ss))
-        thresh = self.epsL
-        # plt.plot(Ss)
-        # plt.plot(np.ones_like(Ss) * thresh)
-        # plt.show()
-        n_features = (tf.math.count_nonzero(Ss > thresh)) if self.channels is None else self.channels
-        if (not self.allow_reduce) and n_features < Cin:
-            n_features = Cin
-        if n_features >= len(S):
-            n_features = len(S)
-
-        # V = V[:n_features]
+        mask = self.get_mask()
 
         K = V
-        if self.equalize:
-            K = np.matmul(np.diag(1/np.sqrt(S / np.average(S)) / std), K)
+        # if self.equalize:
+        #     K = np.matmul(np.diag(1/np.sqrt(S / np.average(S)) / std), K)
+        # else:
+        K = K / (np.count_nonzero(mask) / np.sum(1 / mask))
         bias_forward = -tf.squeeze(tf.matmul(K, tf.expand_dims(mean_p, axis=-1)))
         K = tf.reshape(K, (V.shape[0], ksize[0], ksize[1], Cin))
         K = tf.transpose(K, (1, 2, 3, 0))
 
         K_T = tf.transpose(V)
-        if self.equalize:
-            K_T = np.matmul(K_T, np.diag(np.sqrt(S / np.average(S)) * std))
+        # if self.equalize:
+        #     K_T = np.matmul(K_T, np.diag(np.sqrt(S / np.average(S)) * std))
+        # else:
+        K_T = K_T * (np.count_nonzero(mask) / np.sum(1 / mask))
         bias_backward = mean_p
         bias_backward = tf.reshape(bias_backward, (ksize[0], ksize[1], Cin, 1))
-        # bias_backward = tf.reduce_mean(bias_backward, axis=0)
+        bias_backward /= np.expand_dims(mask, axis=(-1, -2))
         K_T = tf.reshape(K_T, (ksize[0], ksize[1], Cin, V.shape[0]))
         K_T = tf.transpose(K_T, (0, 1, 2, 3))
-        mask = self.get_mask()
         K_T /= np.expand_dims(mask, axis=(-1, -2))
 
-        return K, K_T, bias_forward, bias_backward, n_features
+        return K, K_T, bias_forward, bias_backward
