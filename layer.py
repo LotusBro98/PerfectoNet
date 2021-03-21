@@ -150,6 +150,22 @@ class Layer():
             x[:, :, -1, :] *= 2
         return x
 
+    def save(self, n):
+        np.save("saved/K{}".format(n), self.kernel_forward)
+        np.save("saved/b{}".format(n), self.bias_forward)
+        np.save("saved/K_T{}".format(n), self.kernel_backward)
+        np.save("saved/b_T{}".format(n), self.bias_backward)
+        np.save("saved/std{}".format(n), self.channel_std)
+        np.save("saved/in{}".format(n), self.input_shape)
+
+    def load(self, n):
+        self.kernel_forward = np.load("saved/K{}.npy".format(n))
+        self.bias_forward = np.load("saved/b{}.npy".format(n))
+        self.kernel_backward = np.load("saved/K_T{}.npy".format(n))
+        self.bias_backward = np.load("saved/b_T{}.npy".format(n))
+        self.channel_std = np.load("saved/std{}.npy".format(n))
+        self.input_shape = np.load("saved/in{}.npy".format(n))
+
     def _get_optimal_conv_kernel(self, dataset, batch_size_cells=100000000):
         assert self.ksize in [1, 2, 3]
         assert self.stride in [1, 2]

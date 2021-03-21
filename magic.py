@@ -10,8 +10,6 @@ from distribution import *
 from layer import Layer
 from model import Model
 
-
-DATASET_SIZE = 1000
 BATCH_SIZE = 4
 TEST_SIZE = 4
 
@@ -20,8 +18,8 @@ N_LAYERS = 6
 EPS_START = 0.1
 EPS_END = 0.5
 
-EPS_L_A = 3
-EPS_L_B = 3
+EPS_L_A = 0.2
+EPS_L_B = 0.2
 
 
 SIZE = 2**(N_LAYERS + 1) - 1
@@ -43,7 +41,7 @@ pathsA = list(glob.glob("trainA/*.png"))
 pathsB = list(glob.glob("trainB/*.png"))
 random.shuffle(pathsA)
 random.shuffle(pathsB)
-paths = pathsA[:DATASET_SIZE] + pathsB[:DATASET_SIZE] + pathsA[DATASET_SIZE:DATASET_SIZE+TEST_SIZE] + pathsB[DATASET_SIZE:DATASET_SIZE+TEST_SIZE]
+paths = pathsA[:TEST_SIZE] + pathsB[:TEST_SIZE]
 # random.shuffle(paths)
 
 for path in paths:
@@ -54,34 +52,17 @@ images = np.stack(images)
 
 inp = images
 
-inp_A0 = inp[:DATASET_SIZE]
-inp_B0 = inp[DATASET_SIZE:2*DATASET_SIZE]
-xsA0, ysA0 = build_distribution(inp_A0, equal=True)
-xsB0, ysB0 = build_distribution(inp_B0, equal=True)
-inp_A0 = remap_distribution(inp_A0, xsA0, ysA0)
-inp_B0 = remap_distribution(inp_B0, xsB0, ysB0)
-
-inp[:2*DATASET_SIZE] = np.concatenate([inp_A0, inp_B0])
-inp[2*DATASET_SIZE:2*DATASET_SIZE+TEST_SIZE] = remap_distribution(inp[2*DATASET_SIZE:2*DATASET_SIZE+TEST_SIZE], xsA0, ysA0)
-inp[2*DATASET_SIZE+TEST_SIZE:] = remap_distribution(inp[2*DATASET_SIZE+TEST_SIZE:], xsB0, ysB0)
-
-
-def get_nearest(dataset, subset):
-    diff = np.expand_dims(dataset, axis=0) - np.expand_dims(subset, axis=1)
-    dist = np.sum(np.square(diff), axis=tuple(range(len(diff.shape)))[2:])
-    near = np.argmin(dist, axis=-1)
-    near = np.take(dataset, near, axis=0)
-    return near
-
 
 model = Model(N_LAYERS, EPS_START, EPS_END, approx_n=DISTRIBUTION_APPROX_N)
-model.fit(inp, BATCH_SIZE)
+model.load()
 
-x = model.forward(inp, BATCH_SIZE)
+xsA0 = np.load("saved/xsA0.npy")
+ysA0 = np.load("saved/ysA0.npy")
+xsB0 = np.load("saved/xsB0.npy")
+ysB0 = np.load("saved/ysB0.npy")
 
-x_A0 = x[:DATASET_SIZE]
-x_B0 = x[DATASET_SIZE:2*DATASET_SIZE]
-# all_std = np.std(x, axis=(0,1,2))
+x_A0 = np.load("saved/x_A0.npy")
+x_B0 = np.load("saved/x_B0.npy")
 
 project_A = Layer(ksize=1, stride=1, eps=EPS_L_A)
 xsA, ysA = build_distribution(x_A0, equal=True)#, weights=all_std)
@@ -93,7 +74,7 @@ xsB, ysB = build_distribution(x_B0, equal=True)#, weights=all_std)
 # project_B.fit(remap_distribution(x_B0, xsB, ysB))
 project_B.fit(x_B0)
 
-x_A = project_A.forward(x_A0)
+# x_A = project_A.forward(x_A0)
 # avgA = np.average(x_A0, axis=(0,1,2))
 # stdA = np.std(x_A, axis=(0,1,2))
 # print(avgA)
@@ -101,7 +82,7 @@ x_A = project_A.forward(x_A0)
 # normA = np.sqrt(np.average(np.square(np.linalg.norm(x_A, axis=-1))))
 # print(normA)
 
-x_B = project_B.forward(x_B0)
+# x_B = project_B.forward(x_B0)
 # avgB = np.average(x_B0, axis=(0,1,2))
 # stdB = np.std(x_B, axis=(0,1,2))
 # print(avgB)
@@ -123,9 +104,10 @@ x_B = project_B.forward(x_B0)
 # x_B = project_A.backward(x_B_A)
 # xsB_A, ysB_A = build_distribution(x_B, equal=True)
 
+inp[:TEST_SIZE] = remap_distribution(inp[:TEST_SIZE], xsA0, ysA0)
+inp[TEST_SIZE:] = remap_distribution(inp[TEST_SIZE:], xsB0, ysB0)
 
-x = x[2*DATASET_SIZE:]
-inp = np.concatenate([inp[:1], inp[2*DATASET_SIZE:2*DATASET_SIZE+TEST_SIZE], inp[DATASET_SIZE:DATASET_SIZE+1], inp[2*DATASET_SIZE+TEST_SIZE:]], axis=0)
+x = model.forward(inp)
 
 x_A = x[:TEST_SIZE]
 x_B = x[TEST_SIZE:]
@@ -167,25 +149,21 @@ for i in range(1):
 # x_B = project_B.forward(x_B)
 # x_B = project_A.backward(x_B)
 
-x = np.concatenate([x_A0[:1], x_A, x_B0[:1], x_B], axis=0)
+x = np.concatenate([x_A, x_B], axis=0)
 
 x = model.backward(x, BATCH_SIZE)
 
 outp = x
 
-inp[:1] = remap_distribution(inp[:1], ysA0, xsA0)
-inp[1:TEST_SIZE+1] = remap_distribution(inp[1:TEST_SIZE+1], ysA0, xsA0)
-inp[TEST_SIZE+1:TEST_SIZE+2] = remap_distribution(inp[TEST_SIZE+1:TEST_SIZE+2], ysB0, xsB0)
-inp[TEST_SIZE+2:] = remap_distribution(inp[TEST_SIZE+2:], ysB0, xsB0)
+inp[:TEST_SIZE] = remap_distribution(inp[:TEST_SIZE], ysA0, xsA0)
+inp[TEST_SIZE:] = remap_distribution(inp[TEST_SIZE:], ysB0, xsB0)
 
-outp[:1] = remap_distribution(outp[:1], ysA0, xsA0)
-outp[1:TEST_SIZE+1] = remap_distribution(outp[1:TEST_SIZE+1], ysB0, xsB0)
-outp[TEST_SIZE+1:TEST_SIZE+2] = remap_distribution(outp[TEST_SIZE+1:TEST_SIZE+2], ysB0, xsB0)
-outp[TEST_SIZE+2:] = remap_distribution(outp[TEST_SIZE+2:], ysA0, xsA0)
+outp[:TEST_SIZE] = remap_distribution(outp[:TEST_SIZE], ysB0, xsB0)
+outp[TEST_SIZE:] = remap_distribution(outp[TEST_SIZE:], ysA0, xsA0)
 
-f, ax = plt.subplots(2, 2*(TEST_SIZE+1), figsize=(10*TEST_SIZE, 10))
+f, ax = plt.subplots(2, 2*(TEST_SIZE), figsize=(10*TEST_SIZE, 10))
 
-for i in range(2*(TEST_SIZE+1)):
+for i in range(2*(TEST_SIZE)):
     ax[0, i].imshow(inp[i])
     ax[1, i].imshow(outp[i])
 plt.show()

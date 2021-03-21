@@ -37,3 +37,11 @@ class Model():
             x = layer.backward(x, batch_size)
 
         return x
+
+    def save(self):
+        for i in range(len(self.layers)):
+            self.layers[i].save(i)
+
+    def load(self):
+        for i in range(len(self.layers)):
+            self.layers[i].load(i)
