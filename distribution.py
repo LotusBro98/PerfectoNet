@@ -18,13 +18,14 @@ import scipy.stats as st
 #         plt.plot(slice)
 #     plt.show()
 
-def show_distribution(dataset, approx_n=64):
+def show_distribution(dataset, approx_n=64, sigma=2):
     dataset = np.reshape(dataset, [dataset.shape[0] * dataset.shape[1] * dataset.shape[2], dataset.shape[3]])
     density = np.zeros((dataset.shape[-1], approx_n,))
+    mean = np.average(dataset, axis=0)
+    std = np.sqrt(np.sum(np.square(np.std(dataset, axis=0))))
+    print(sigma, std, sigma * std)
     for n in range(dataset.shape[-1]):
-        mean = np.average(dataset[:, n])
-        std = np.std(dataset[:, n])
-        checks = np.linspace(mean - std, mean + std, approx_n + 1)
+        checks = np.linspace(mean[n] - sigma * std, mean[n] + sigma * std, approx_n + 1)
         for i in range(0, approx_n):
             count = np.count_nonzero((dataset[:, n] >= checks[i]) * (dataset[:, n] < checks[i + 1]))
             density[n, i] = count
@@ -129,8 +130,14 @@ def build_distribution(dataset, approx_n=100, equal=True, weights=None):
         else:
             ys *= weights
 
-    xs = xs[1:-1]
-    ys = ys[1:-1]
+    cx = xs[len(xs) // 2]
+    cy = ys[len(ys) // 2]
+
+    xs[0] = 2 * (xs[1] - cx) + cx
+    xs[-1] = 2 * (xs[-2] - cx) + cx
+
+    ys[0] = 2 * (ys[1] - cy) + cy
+    ys[-1] = 2 * (ys[-2] - cy) + cy
 
     # for c in range(xs.shape[-1]):
     #     plt.plot(xs[:,c], ys[:,c])
