@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from distribution import *
 
 class Layer():
-    def __init__(self, ksize=3, stride=2, orient="both", eps=1e-2, distribution_approx_n=100, channels=None, equalize=False, dropout=0.01):
+    def __init__(self, ksize=3, stride=2, orient="both", eps=1e-2, distribution_approx_n=100, channels=None, equalize=False, dropout=0.2):
         self.ksize = ksize
         self.stride = stride
         self.eps = eps
@@ -67,8 +67,8 @@ class Layer():
         print("Counting std ...")
         peak_std = get_std_by_peak(x)
         take_channels = np.argsort(peak_std)[::-1]
-        # collect_std = np.sqrt(np.cumsum(np.square(np.sort(peak_std))))
-        n_features = np.count_nonzero(peak_std >= self.eps) if self.channels is None else self.channels
+        collect_std = np.sqrt(np.cumsum(np.square(np.sort(peak_std))))
+        n_features = np.count_nonzero(collect_std >= self.eps) if self.channels is None else self.channels
 
         self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
         self.kernel_forward = np.take(self.kernel_forward, take_channels, axis=-1)
@@ -132,14 +132,15 @@ class Layer():
         embeds = []
         for i in range(n_embeds):
             embed = np.zeros((3, n_embeds), dtype=np.float32)
+            ts = [0, -1, 1]
             for j in range(3):
-                t = (j - 1) * sigma * self.channel_std[n_features + i]
+                t = ts[j] * sigma * self.channel_std[n_features + i]
                 embed[j] = np.eye(n_embeds)[i] * t
             embeds.append(embed)
 
         self.embeds = embeds
 
-    def build_embed_lookup(self, idx, eps=0.05):
+    def build_embed_lookup(self, idx, eps=0.22):
         n_embeds = idx.shape[-1]
         idx = np.reshape(idx, (idx.shape[0] * idx.shape[1] * idx.shape[2], idx.shape[3]))
         n_vals = np.max(idx, axis=0) + 1
@@ -160,7 +161,9 @@ class Layer():
 
             probs = np.float32([np.count_nonzero((idx_group == combos[i]).all(axis=-1)) for i in range(n_combos)]) / len(idx_group)
             order = np.argsort(probs)[::-1]
-            take_n = np.count_nonzero(np.cumsum(np.sort(probs)[::-1]) < 1 - eps)
+            # take_n = np.count_nonzero(probs > eps)
+            take_n = np.count_nonzero(np.cumsum([0] + list(np.sort(probs)[::-1])) < 1 - eps)
+            # take_n = len(probs)
             if take_n <= 1:
                 continue
 
@@ -196,7 +199,7 @@ class Layer():
         return old_idx
 
 
-    def get_dependence_groups(self, idx, eps=0.5):
+    def get_dependence_groups(self, idx, eps=0.35):
         n_embeds = idx.shape[-1]
 
         cnt = [np.bincount(idx[:, i]) / len(idx) for i in range(n_embeds)]
@@ -353,13 +356,16 @@ class Layer():
         x_float = x[0]
         n_embeds = self.kernel_backward.shape[-1] - x_float.shape[-1]
         idx = x[1]
-        # idx = self.embed_unlookup(idx)
+        idx = self.embed_unlookup(idx)
         idx, idx_prev = self.unmerge_embeds(idx)
+        # idx_prev = idx[:,:,:,:0]
 
         x_embed = np.zeros(idx.shape[:-1] + (n_embeds,), dtype=np.float32)
 
         for i in range(n_embeds):
             x_embed += np.take(self.embeds[i], idx[:,:,:,i], axis=0)
+
+        # x_embed *= 0
 
         return np.concatenate([x_float, x_embed], axis=-1), idx_prev
 
@@ -401,7 +407,7 @@ class Layer():
         if hasattr(self, "embeds"):
             x, idx = self.embed(x[0])
             idx = self.merge_embeds(idx, x[1])
-            # idx = self.embed_lookup(idx)
+            idx = self.embed_lookup(idx)
 
         # if hasattr(self, "channel_std") and self.channel_std is not None:
         #     # x = self.channel_std * np.tanh(x / self.channel_std)
