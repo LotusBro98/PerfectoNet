@@ -96,10 +96,11 @@ def get_non_peak_channels(dataset, sigma=0.05, eps=0.1):
 
 def get_std_by_peak(dataset, prob=0.68):
     sigma = scipy.special.erfinv(prob) * np.sqrt(2)
-    dataset = np.reshape(dataset, [dataset.shape[0] * dataset.shape[1] * dataset.shape[2], dataset.shape[3]])
-    mean = np.average(dataset, axis=0)
-    absdiff = np.abs(dataset - mean)
-    absdiff = np.sort(absdiff, axis=0)
+    if len(dataset.shape) == 4:
+        dataset = tf.reshape(dataset, [dataset.shape[0] * dataset.shape[1] * dataset.shape[2], dataset.shape[3]])
+    mean = tf.reduce_mean(dataset, axis=0)
+    absdiff = tf.abs(dataset - mean)
+    absdiff = tf.sort(absdiff, axis=0)
 
     peak_std = sigma * absdiff[int(len(absdiff) * prob)]
 
@@ -218,7 +219,8 @@ def common_distribution(dataset, approx_n=None, c1=0, c2=1):
     density = np.zeros((approx_n, approx_n))
 
     mean = np.average(dataset, axis=0)
-    std = np.std(dataset, axis=0)
+    # std = np.std(dataset, axis=0)
+    std = (np.max(dataset, axis=0) - np.min(dataset, axis=0)) / 2
 
     checks = np.linspace(mean[0] - std[0], mean[0] + std[0], approx_n + 1)
     checks1 = np.linspace(mean[1] - std[1], mean[1] + std[1], approx_n + 1)
@@ -250,7 +252,7 @@ def gkern(kernlen=21, nsig=3):
 def show_common_distributions(dataset, eps=0.25):
     approx_n_opt = int(math.ceil(np.sqrt(len(dataset)) * eps))
     approx_n_check = 32
-    approx_n_show = 50
+    approx_n_show = 32
 
     # if approx_n_check > approx_n_opt:
     #     approx_n_check = approx_n_opt
@@ -265,22 +267,23 @@ def show_common_distributions(dataset, eps=0.25):
     pairs = []
     for i in range(dataset.shape[-1]):
         for j in range(dataset.shape[-1]):
-            if i == j:
-                dependence_matrix[i, j] = 1
-                # continue
-            density = common_distribution(dataset, c1=i, c2=j, approx_n=approx_n_check)
-            density0 = np.sum(density, axis=1)
-            density1 = np.sum(density, axis=0)
-            density0 /= np.sum(density0)
-            density1 /= np.sum(density1)
-            density_equal = np.outer(density0, density1)
-            density_diff = np.sum(np.abs(density_equal - density))
-            print(density_diff)
-            if density_diff > eps:
-                dependence_matrix[i, j] = 1
-            else:
-                dependence_matrix[i, j] = 0
-                continue
+            print(i, j)
+            # if i == j:
+            #     dependence_matrix[i, j] = 1
+            #     # continue
+            # density = common_distribution(dataset, c1=i, c2=j, approx_n=approx_n_check)
+            # density0 = np.sum(density, axis=1)
+            # density1 = np.sum(density, axis=0)
+            # density0 /= np.sum(density0)
+            # density1 /= np.sum(density1)
+            # density_equal = np.outer(density0, density1)
+            # density_diff = np.sum(np.abs(density_equal - density))
+            # print(density_diff)
+            # if density_diff > eps:
+            #     dependence_matrix[i, j] = 1
+            # else:
+            #     dependence_matrix[i, j] = 0
+            #     continue
 
             density = common_distribution(dataset, approx_n=approx_n_show, c1=i, c2=j)
             # density = density_equal

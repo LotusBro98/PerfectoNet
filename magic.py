@@ -18,8 +18,8 @@ N_LAYERS = 6
 EPS_START = 0.1
 EPS_END = 0.2
 
-EPS_L_A = 2
-EPS_L_B = 2
+EPS_L_A = 0.3
+EPS_L_B = 0.3
 
 
 SIZE = 2**(N_LAYERS + 1) - 1
@@ -121,17 +121,17 @@ print(x.shape)
 x_A = x[:TEST_SIZE]
 x_B = x[TEST_SIZE:]
 
-# x_A = remap_distribution(x_A, xsA, ysA)
-# x_A = remap_distribution(x_A, ysB, xsB)
+x_A = remap_distribution(x_A, xsA, ysA)
+x_A = remap_distribution(x_A, ysB, xsB)
 # print("x_A->B: {}".format(project_B.forward(x_A).shape))
 for i in range(1):
     x_A = project_B.forward(x_A)
     # x_A = (x_A - avgA_B) / stdA_B * stdB + avgB
     # x_A /= stdB
-    norm = np.linalg.norm(x_A, axis=-1, keepdims=True)
-    x_A = x_A / norm * normB
-    x_A = remap_distribution(x_A, xsA_B, ysA_B)
-    x_A = remap_distribution(x_A, ysB_B, xsB_B)
+    # norm = np.linalg.norm(x_A, axis=-1, keepdims=True)
+    # x_A = x_A / norm * normB
+    # x_A = remap_distribution(x_A, xsA_B, ysA_B)
+    # x_A = remap_distribution(x_A, ysB_B, xsB_B)
     # print(norm)
     # x_A *= stdB
     x_A = project_B.backward(x_A)
@@ -140,17 +140,17 @@ for i in range(1):
 # x_A = project_A.forward(x_A)
 # x_A = project_B.backward(x_A)
 
-# x_B = remap_distribution(x_B, xsB, ysB)
-# x_B = remap_distribution(x_B, ysA, xsA)
+x_B = remap_distribution(x_B, xsB, ysB)
+x_B = remap_distribution(x_B, ysA, xsA)
 # print("x_B->A: {}".format(project_A.forward(x_B).shape))
 for i in range(1):
     x_B = project_A.forward(x_B)
     # x_B = (x_B - avgB_A) / stdB_A * stdA + avgA
     # x_B /= stdA
-    norm = np.linalg.norm(x_B, axis=-1, keepdims=True)
-    x_B = x_B / norm * normA
-    x_B = remap_distribution(x_B, xsB_A, ysB_A)
-    x_B = remap_distribution(x_B, ysA_A, xsA_A)
+    # norm = np.linalg.norm(x_B, axis=-1, keepdims=True)
+    # x_B = x_B / norm * normA
+    # x_B = remap_distribution(x_B, xsB_A, ysB_A)
+    # x_B = remap_distribution(x_B, ysA_A, xsA_A)
     # x_B *= stdA
     x_B = project_A.backward(x_B)
     # x_B -= avgA

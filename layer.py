@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from distribution import *
 
 class Layer():
-    def __init__(self, ksize=3, stride=2, orient="both", eps=1e-2, distribution_approx_n=100, channels=None, equalize=False, dropout=0.2):
+    def __init__(self, ksize=3, stride=2, orient="both", eps=1e-2, distribution_approx_n=100, channels=None, equalize=False, clip_loss=0.05):
         self.ksize = ksize
         self.stride = stride
         self.eps = eps
@@ -16,7 +16,7 @@ class Layer():
         self.distribution_approx_n = distribution_approx_n
         self.orient = orient
         self.equalize = equalize
-        self.dropout = dropout
+        self.clip_loss = clip_loss
         pass
 
     def get_mask(self):
@@ -50,7 +50,7 @@ class Layer():
         return mask
 
     def fit(self, dataset, batch_size=1):
-        x, idx_prev = dataset
+        x = dataset
 
         self.input_shape = x.shape
 
@@ -64,26 +64,31 @@ class Layer():
         x = self.forward(x, batch_size, do_remap=False)
         # x = self.gather(x)
 
-        print("Counting std ...")
-        peak_std = get_std_by_peak(x)
-        take_channels = np.argsort(peak_std)[::-1]
-        collect_std = np.sqrt(np.cumsum(np.square(np.sort(peak_std))))
-        n_features = np.count_nonzero(collect_std >= self.eps) if self.channels is None else self.channels
+        # print("Counting std ...")
+        # peak_std = get_std_by_peak(x)
+        # take_channels = np.argsort(peak_std)[::-1]
+        # peak_std = np.std(x, axis=(0,1,2))
+        # collect_std = np.sqrt(np.cumsum(np.square(np.sort(peak_std))))
+        # n_features = np.count_nonzero(collect_std >= self.eps) if self.channels is None else self.channels
 
-        self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
-        self.kernel_forward = np.take(self.kernel_forward, take_channels, axis=-1)
-        self.kernel_backward = np.take(self.kernel_backward, take_channels, axis=-1)
-        x = np.take(x, take_channels, axis=-1)
-        self.channel_std = np.take(peak_std, take_channels, axis=-1)
-        self.n_features = n_features
+        # self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
+        # self.kernel_forward = np.take(self.kernel_forward, take_channels, axis=-1)
+        # self.kernel_backward = np.take(self.kernel_backward, take_channels, axis=-1)
 
-        self.calc_embed(x, n_features)
-        x, idx = self.embed(x)
-        idx = self.merge_embeds(idx, idx_prev)
-        self.build_embed_lookup(idx)
-        idx = self.embed_lookup(idx)
+        # self.n_features = n_features
+        # self.channel_std = np.take(peak_std, take_channels, axis=-1)
+        # self.channel_std = self.channel_std[:n_features]
 
-        # x = self.gather(x)
+        # x = tf.gather(x, take_channels, axis=-1)
+        # x = tf.take(x, take_channels, axis=-1)
+
+
+        self.get_2_order_kernel(x, self.eps)
+        # x = x[:, :, :, :n_features]
+        print("Polar coordinates...")
+        x = self._forward_2_order(x, show_plow=True)
+        # x = self.clip(x)
+
 
         # show_common_distributions(x)
 
@@ -100,276 +105,146 @@ class Layer():
         # default_before = np.matmul(self.kernel_backward, default_after)
         # self.bias_backward += np.expand_dims(default_before, axis=-1)
 
-        self.bias_forward = self.bias_forward[:n_features]
-        self.kernel_forward = self.kernel_forward[:, :, :, :n_features]
+        # self.bias_forward = self.bias_forward[:n_features]
+        # self.kernel_forward = self.kernel_forward[:, :, :, :n_features]
+
+        # Km = np.matmul(self.kernel_backward[:, :, :, n_features:], self.Km)
         # self.kernel_backward = self.kernel_backward[:, :, :, :n_features]
+        # self.kernel_backward = np.concatenate([self.kernel_backward, np.zeros_like(self.kernel_backward)], axis=-1)
         # self.kernel_backward += Km
-        # x = x[:,:,:,:n_features]
-        self.channel_std = self.channel_std[:n_features]
 
         self.kernel_backward /= np.expand_dims(self.get_mask(), axis=(-1, -2))
         self.bias_backward /= np.expand_dims(self.get_mask(), axis=(-1, -2))
 
-        # sigma = scipy.special.erfinv(1 - self.dropout) * np.sqrt(2)
-        # where = np.abs(x) > (sigma * self.channel_std)
-        # x[where] = (np.sign(x) * sigma * self.channel_std)[where]
-
-        # self.xs, self.ys = build_distribution(x, self.distribution_approx_n, equal=False, weights=self.channel_std)
-
-        return x, idx
-
-    def calc_embed(self, x, n_features):
-        n_embeds = x.shape[-1] - n_features
-        sigma = scipy.special.erfinv(1 - self.dropout) * np.sqrt(2)
-        std = np.sqrt(np.sum(np.square(self.channel_std)))
-        dist = sigma * std
-        x_disc = x[:, :, :, n_features:]
-        x_disc = np.reshape(x_disc, (x_disc.shape[0] * x_disc.shape[1] * x_disc.shape[2], x_disc.shape[3]))
-        idx = 0 * np.ones_like(x_disc, dtype=np.int32)
-        idx[x_disc < -(sigma * self.channel_std[n_features:])] = 1
-        idx[x_disc > (sigma * self.channel_std[n_features:])] = 2
-
-        embeds = []
-        for i in range(n_embeds):
-            embed = np.zeros((3, n_embeds), dtype=np.float32)
-            ts = [0, -1, 1]
-            for j in range(3):
-                t = ts[j] * sigma * self.channel_std[n_features + i]
-                embed[j] = np.eye(n_embeds)[i] * t
-            embeds.append(embed)
-
-        self.embeds = embeds
-
-    def build_embed_lookup(self, idx, eps=0.22):
-        n_embeds = idx.shape[-1]
-        idx = np.reshape(idx, (idx.shape[0] * idx.shape[1] * idx.shape[2], idx.shape[3]))
-        n_vals = np.max(idx, axis=0) + 1
-
-        groups = self.get_dependence_groups(idx)
+        return x
 
-        idx_lookup = []
-
-        for group in groups:
-            n_vals_group = n_vals[group]
-            idx_group = idx[:,group]
-            n_combos = np.product(n_vals_group)
-            combos = np.zeros((n_combos, len(group)))
-            combos[:,0] = np.arange(n_combos)
-            for i in range(len(group)-1):
-                combos[:,i+1] = combos[:,i] // n_vals_group[i]
-                combos[:,i] %= n_vals_group[i]
 
-            probs = np.float32([np.count_nonzero((idx_group == combos[i]).all(axis=-1)) for i in range(n_combos)]) / len(idx_group)
-            order = np.argsort(probs)[::-1]
-            # take_n = np.count_nonzero(probs > eps)
-            take_n = np.count_nonzero(np.cumsum([0] + list(np.sort(probs)[::-1])) < 1 - eps)
-            # take_n = len(probs)
-            if take_n <= 1:
-                continue
-
-            lookup = [
-                group,
-                combos[order][:take_n]
-            ]
-
-            idx_lookup.append(lookup)
-
-        print(idx_lookup)
-        self.idx_lookup = idx_lookup
-        self.old_idx_len = idx.shape[-1]
-
-
-    def embed_lookup(self, idx):
-        new_idx = np.zeros(idx.shape[:-1] + (len(self.idx_lookup),), dtype=np.int32)
-        for i in range(len(self.idx_lookup)):
-            group, lookup = self.idx_lookup[i]
-            group_idx = idx[:,:,:,group]
-            new_idx[:,:,:,i] = np.argmax((np.expand_dims(group_idx, axis=-2) == lookup).all(axis=-1), axis=-1)
-
-        return new_idx
-
-
-    def embed_unlookup(self, idx):
-        old_idx = np.zeros(idx.shape[:-1] + (self.old_idx_len,), dtype=np.int32)
-        for i in range(len(self.idx_lookup)):
-            group, lookup = self.idx_lookup[i]
-            group_idx = np.take(lookup, idx[:,:,:,i], axis=0)
-            old_idx[:,:,:,group] = group_idx
-
-        return old_idx
-
-
-    def get_dependence_groups(self, idx, eps=0.35):
-        n_embeds = idx.shape[-1]
-
-        cnt = [np.bincount(idx[:, i]) / len(idx) for i in range(n_embeds)]
-
-        idxs_tree = []
-        for i in range(n_embeds):
-            vals_i = np.max(idx[:, i]) + 1
-            idxs_i = []
-            for idx_i in range(vals_i):
-                idxs_i.append(idx[idx[:, i] == idx_i])
-            idxs_tree.append(idxs_i)
-
-        dependence = np.zeros((n_embeds, n_embeds))
-        for i in range(n_embeds):
-            vals_i = np.max(idx[:, i]) + 1
-            for j in range(n_embeds):
-                # print(i, j)
-                vals_j = np.max(idx[:, j]) + 1
-                common_prob = np.zeros((vals_i, vals_j))
-                for idx_i in range(vals_i):
-                    for idx_j in range(vals_j):
-                        # common_prob[idx_i, idx_j] = np.count_nonzero((idx[:,(i,j)] == (idx_i, idx_j)).all(axis=-1)) / len(idx)
-                        common_prob[idx_i, idx_j] = np.count_nonzero(idxs_tree[i][idx_i][:, j] == idx_j) / len(idx)
-
-                sep_prob = np.outer(cnt[i], cnt[j])
-
-                dependence[i, j] = np.max(np.abs(sep_prob - common_prob))
-
-        dependence = np.int32(dependence > eps * np.max(dependence))
-
-        # plt.imshow(dependence)
-        # plt.show()
-
-        domains = self.group_domains(dependence)
-
-        # print(domains)
-
-        return domains
-
-        # plt.imshow(D)
-        # plt.show()
-
-    def group_domains(self, D):
-        order = list(range(len(D)))
-
-        def swap(i, i1):
-            t = D[i].copy()
-            D[i] = D[i1]
-            D[i1] = t
-
-            t = D[:,i].copy()
-            D[:,i] = D[:,i1]
-            D[:,i1] = t
-
-            t = order[i]
-            order[i] = order[i1]
-            order[i1] = t
-
-        k = 0
-        for i in range(0, len(D) - 1):
-            k = max(k, i + 1)
-            for j in range(k + 1, len(D)):
-                if D[i, j] != 0:
-                    swap(k, j)
-                    k += 1
-
-                    # plt.imshow(D)
-                    # plt.show()
-
-        domains = []
-        start = 0
-        for i in range(1, len(D)):
-            if np.count_nonzero(D[i,0:i]) == 0:
-                domains.append(order[start:i])
-                # domains.append(list(range(start, i)))
-                start = i
-        domains.append(list(range(start, len(D))))
+    def get_2_order_kernel(self, x, eps, batch_size_cells=100000000):
+        self.channel_std = np.std(x, axis=(0,1,2))
 
-        return domains
+        xp = self._forward_2_order(x, matmul=False)
 
-    def embed(self, x):
-        x_float = x[:,:,:,:self.n_features]
-        x_embed = x[:,:,:,self.n_features:]
+        xp = np.reshape(xp, (xp.shape[0] * xp.shape[1] * xp.shape[2], xp.shape[3]))
 
-        sigma = scipy.special.erfinv(1 - self.dropout) * np.sqrt(2)
+        mean = np.average(xp, axis=0)
 
-        idx = 0 * np.ones_like(x_embed, dtype=np.int32)
-        idx[x_embed < -(sigma * self.channel_std[self.n_features:])] = 1
-        idx[x_embed > (sigma * self.channel_std[self.n_features:])] = 2
+        N = 0
+        cov = 0
+        batch_size = int(math.ceil(batch_size_cells / (xp.shape[-1] * xp.shape[-1])))
+        for i in range(0, xp.shape[0], batch_size):
+            batch = xp[i: i + batch_size]
+            batch = batch - mean
 
-        return (x_float, idx)
+            batch_cov = tf.matmul(tf.expand_dims(batch, axis=-1), tf.expand_dims(batch, axis=-2))
+            batch_cov = tf.reduce_sum(batch_cov, axis=0)
 
-
-    def merge_embeds(self, idx, idx_prev):
-        if self.orient == "both":
-            ksize = (self.ksize, self.ksize)
-            stride = (self.stride, self.stride)
-        elif self.orient == "hor":
-            ksize = (1, self.ksize)
-            stride = (1, self.stride)
-        elif self.orient == "ver":
-            ksize = (self.ksize, 1)
-            stride = (self.stride, 1)
-
-        patches = tf.image.extract_patches(
-            idx_prev,
-            [1, ksize[0], ksize[1], 1],
-            [1, stride[0], stride[1], 1],
-            [1, 1, 1, 1], padding='VALID')
-
-        return np.concatenate([idx, patches], axis=-1)
-
-    def unmerge_embeds(self, idx):
-        if self.orient == "both":
-            ksize = (self.ksize, self.ksize)
-            stride = (self.stride, self.stride)
-        elif self.orient == "hor":
-            ksize = (1, self.ksize)
-            stride = (1, self.stride)
-        elif self.orient == "ver":
-            ksize = (self.ksize, 1)
-            stride = (self.stride, 1)
-
-        assert self.ksize == 3
-        assert self.stride in (1, 2)
-
-        n_embeds = self.kernel_backward.shape[-1] - self.n_features
-        idx_prev = idx[:,:,:,n_embeds:]
-        idx = idx[:,:,:,:n_embeds]
-
-        n_embeds_prev = idx_prev.shape[-1] // (ksize[0] * ksize[1])
-        b, h, w, c = idx_prev.shape
-        new_h = (2 * h + 1) if stride[0] == 2 else h
-        new_w = (2 * w + 1) if stride[1] == 2 else w
-        new_idx_prev = np.zeros((b, new_h, new_w, n_embeds_prev), dtype=np.int32)
-        idx_prev_get = np.reshape(idx_prev, idx_prev.shape[:-1] + ksize + (n_embeds_prev,))
-
-        for i in range(new_h):
-            for j in range(new_w):
-                new_idx_prev[:, i, j] = idx_prev_get[:, i//ksize[0], j//ksize[1], i%ksize[0], j%ksize[1]]
-
-        for i in range(new_h):
-            # new_idx_prev[:, i, 0] = idx_prev_get[:, i//ksize[0], 0, i%ksize[0], 0]
-            new_idx_prev[:, i, -1] = idx_prev_get[:, i//ksize[0], -1, i%ksize[0], -1]
-
-        for j in range(new_w):
-            # new_idx_prev[:, 0, j] = idx_prev_get[:, 0, j // ksize[1], 0, j % ksize[1]]
-            new_idx_prev[:, -1, j] = idx_prev_get[:, -1, j // ksize[1], -1, j % ksize[1]]
-
-        return idx, new_idx_prev
-
-
-    def unembed(self, x):
-        x_float = x[0]
-        n_embeds = self.kernel_backward.shape[-1] - x_float.shape[-1]
-        idx = x[1]
-        idx = self.embed_unlookup(idx)
-        idx, idx_prev = self.unmerge_embeds(idx)
-        # idx_prev = idx[:,:,:,:0]
-
-        x_embed = np.zeros(idx.shape[:-1] + (n_embeds,), dtype=np.float32)
-
-        for i in range(n_embeds):
-            x_embed += np.take(self.embeds[i], idx[:,:,:,i], axis=0)
-
-        # x_embed *= 0
-
-        return np.concatenate([x_float, x_embed], axis=-1), idx_prev
-
-
+            N += batch.shape[0]
+            cov += batch_cov
+        cov = cov / N
+
+        U, S, V = np.linalg.svd(cov)
+        plt.imshow(np.abs(V))
+        plt.show()
+
+        # mixed = np.argwhere(np.max(np.abs(V[:,:-1]), axis=0) < 0.999)[:,0]
+        # V1 = np.take(V, mixed+1, axis=0)
+        # V1 = np.take(V1, mixed, axis=1)
+
+
+        print("Counting peak std...")
+        # xp1 = np.matmul(V, np.expand_dims(xp - mean, axis=-1)).squeeze(-1)
+        # peak_std = get_std_by_peak(xp1)
+        # print(peak_std)
+        # peak_std = np.stack([np.std(xp1[np.abs(xp1[:,i]) < peak_std[i]]) for i in range(xp1.shape[-1])], axis=-1)
+        # print(peak_std)
+        peak_std = np.sqrt(S)
+        take_channels = np.argsort(peak_std)[::-1]
+        # print(take_channels)
+
+        # collect_std = np.sqrt(np.cumsum(np.sort(np.square(peak_std))))
+        # collect_std /= collect_std[-1]
+        # n_features = np.count_nonzero(collect_std >= eps)
+        n_features = np.count_nonzero(peak_std >= eps)
+
+        plt.plot(np.log(np.sort(peak_std)[::-1]))
+        # plt.plot(np.log(collect_std[::-1]))
+        plt.plot(np.log(np.ones_like(S) * eps))
+        plt.show()
+
+        self.K2 = np.take(V, take_channels, axis=0)[:n_features]
+        # self.K2 = V[:n_features]
+        self.m2 = mean
+
+        # s = np.sign(x)
+        # x2 = np.matmul(self.K2, np.expand_dims(x2 - self.m2, axis=-1)).squeeze(-1)
+        # Ks = np.linalg.lstsq(x2, s, rcond=None)[0].T
+        # self.Ks = Ks
+
+        # print(self.K2.shape)
+
+    def _forward_2_order(self, x, matmul=True, show_plow=False):
+        # x = self.clip(x)
+        x = x / self.channel_std
+
+        xp = [tf.math.asin(x[:,:,:,i] / tf.linalg.norm(x[:,:,:,i:], axis=-1)) for i in range(0, x.shape[-1]-1)]
+        xp = xp + [tf.linalg.norm(x, axis=-1) * tf.sign(x[:,:,:,-1])]
+        xp = tf.stack(xp, axis=-1)
+
+        xp = tf.concat([
+            xp[:, :, :, :-1] * self.channel_std[:-1],
+            xp[:, :, :, -1:] * np.sqrt(np.sum(np.square(self.channel_std))),
+        ], axis=-1)
+
+        if matmul:
+            xp = xp - self.m2
+
+        # xp = self.clip(xp)
+
+        if matmul:
+            if show_plow:
+                # show_common_distributions(xp.numpy())
+                # xp2 = tf.squeeze(tf.matmul(self.K2, tf.expand_dims(xp, axis=-1)), axis=-1)
+                # show_common_distributions(xp2.numpy())
+                # xp2 = tf.squeeze(tf.matmul(self.K2.T, tf.expand_dims(xp2, axis=-1)), axis=-1) + self.m2
+                # show_common_distributions(xp2.numpy())
+                # show_distribution(xp)
+                pass
+
+            xp = tf.squeeze(tf.matmul(self.K2, tf.expand_dims(xp, axis=-1)), axis=-1)
+
+        return xp
+
+    def _backward_2_order(self, x):
+        x = tf.squeeze(tf.matmul(self.K2.T, tf.expand_dims(x, axis=-1)), axis=-1)
+
+        x = x + self.m2
+
+        x = tf.concat([
+            x[:, :, :, :-1] / self.channel_std[:-1],
+            x[:, :, :, -1:] / np.sqrt(np.sum(np.square(self.channel_std))),
+        ], axis=-1)
+
+        # r = self.channel_std#1#x.shape[-1]#x[:,:,:,-1]
+        r = x[:,:,:,-1]
+        f = x[:,:,:,:-1]
+        xd = [tf.abs(r) * tf.sin(f[:,:,:,i]) * tf.reduce_prod(tf.abs(tf.cos(f[:,:,:,:i])), axis=-1) for i in range(0, f.shape[-1])]
+        xd = xd + [r * tf.reduce_prod(tf.abs(tf.cos(f[:,:,:,:])), axis=-1)]
+        xd = tf.stack(xd, axis=-1)
+
+        xd = xd * self.channel_std
+        # xd = self.clip(xd)
+
+        # x = self.clip(x)
+        # x2 = tf.concat([x, np.square(x)], axis=-1)
+        # x2 = x2 - self.m2
+        # xm = np.matmul(self.Km, np.expand_dims(x2, axis=-1)).squeeze(-1)
+        # x = np.concatenate([x, xm], axis=-1)
+        # x = np.square(x) * np.sign(x)
+        # x = np.matmul(self.K2.T, np.expand_dims(x, axis=-1)).squeeze(-1) + self.m2
+        # x = np.sqrt(np.abs(x)) * np.sign(x)
+        # x = self.unclip(x)
+        # x = x2
+        return xd
 
     def calc_minor_matrix(self, x, std, n_features):
         minor = x[:,:,:,n_features:]
@@ -404,57 +279,41 @@ class Layer():
             x_conv.append(batch)
         x = np.concatenate(x_conv, axis=0)
 
-        if hasattr(self, "embeds"):
-            x, idx = self.embed(x[0])
-            idx = self.merge_embeds(idx, x[1])
-            idx = self.embed_lookup(idx)
+        if hasattr(self, "K2"):
+            x = self._forward_2_order(x)
 
         # if hasattr(self, "channel_std") and self.channel_std is not None:
-        #     # x = self.channel_std * np.tanh(x / self.channel_std)
-        #     x = self.gather(x)
-        #     # sigma = scipy.special.erfinv(1 - self.dropout) * np.sqrt(2)
-        #     # where = np.abs(x) > (sigma * self.channel_std)
-        #     # x[where] = (np.sign(x) * sigma * self.channel_std)[where]
+        #     x = self.clip(x)
 
         # if do_remap:
         #     x = remap_distribution(x, self.xs, self.ys)
 
-        if hasattr(self, "embeds"):
-            return (x, idx)
-        else:
-            return x
-
-    def gather(self, x):
-        sigma = scipy.special.erfinv(1 - self.dropout) * np.sqrt(2)
-        std = np.sqrt(np.sum(np.square(self.channel_std)))
-        # sigma = 5
-
-        # x = np.clip(x / self.channel_std, -sigma, sigma) * self.channel_std
-
-        x = x / std
-        # x = np.log(1 + np.abs(x)) * np.sign(x)
-        x = np.clip(x, -sigma, sigma)
-        x = x * std
         return x
 
-    def scatter(self, x):
-        sigma = scipy.special.erfinv(1 - self.dropout) * np.sqrt(2)
-        std = np.sqrt(np.sum(np.square(self.channel_std)))
-        # sigma = 5
+    # def unclip(self, x):
+    #     sigma = scipy.special.erfinv(1 - self.clip_loss) * np.sqrt(2)
+    #     std = self.channel_std
+    #
+    #     x = np.clip(x, -sigma, sigma)
+    #     x = x * std
+    #     return x
 
-        # x = np.clip(x / self.channel_std, -sigma, sigma) * self.channel_std
+    def clip(self, x):
+        sigma = scipy.special.erfinv(1 - self.clip_loss) * np.sqrt(2)
+        std = self.channel_std
+        # std = np.sqrt(np.sum(self.channel_std))
 
         x = x / std
-        x = np.clip(x, -sigma, sigma)
-        # x = (np.exp(np.abs(x)) - 1) * np.sign(x)
+        # x = x.numpy()
+        x = tf.clip_by_value(x, -sigma, sigma)
+        # x[:,:,:,-1] = tf.clip_by_value(x[:,:,:,-1], -sigma, sigma)
+        # x[:,:,:,-1] = np.clip(x[:,:,:,-1], -sigma, sigma)
         x = x * std
         return x
 
     def backward(self, x, batch_size=1):
-        x, idx_prev = self.unembed(x)
-        # x = remap_distribution(x, self.ys, self.xs)
-        # x = self.channel_std * np.arctanh(x / self.channel_std)
-        # x = self.scatter(x)
+
+        x = self._backward_2_order(x)
 
         if self.orient == "both":
             stride = (self.stride, self.stride)
@@ -474,7 +333,7 @@ class Layer():
                 tf.ones_like(batch0[:,:,:,:1]), self.bias_backward, (batch0.shape[0], h, w, c),
                 (1, stride[0], stride[1], 1), padding="VALID")
             batch += bias
-            batch = batch.numpy()
+            # batch = batch.numpy()
             x_conv.append(batch)
         x = np.concatenate(x_conv, axis=0)
         if self.ksize == 3 and self.stride == 2:
@@ -489,15 +348,19 @@ class Layer():
             x[:, -1, :, :] *= 2
             x[:, :, 0, :] *= 2
             x[:, :, -1, :] *= 2
-        return x, idx_prev
+        return x
 
     def save(self, n):
         np.save("saved/K{}".format(n), self.kernel_forward)
         np.save("saved/b{}".format(n), self.bias_forward)
         np.save("saved/K_T{}".format(n), self.kernel_backward)
         np.save("saved/b_T{}".format(n), self.bias_backward)
+        # np.save("saved/Km{}".format(n), self.Km)
+        np.save("saved/K2{}".format(n), self.K2)
+        np.save("saved/m2{}".format(n), self.m2)
         np.save("saved/std{}".format(n), self.channel_std)
         np.save("saved/in{}".format(n), self.input_shape)
+        # np.save("saved/nc{}".format(n), self.n_features)
         # np.save("saved/xs{}".format(n), self.xs)
         # np.save("saved/ys{}".format(n), self.ys)
 
@@ -506,8 +369,12 @@ class Layer():
         self.bias_forward = np.load("saved/b{}.npy".format(n))
         self.kernel_backward = np.load("saved/K_T{}.npy".format(n))
         self.bias_backward = np.load("saved/b_T{}.npy".format(n))
+        # self.Km = np.load("saved/Km{}.npy".format(n))
+        self.K2 = np.load("saved/K2{}.npy".format(n))
+        self.m2 = np.load("saved/m2{}.npy".format(n))
         self.channel_std = np.load("saved/std{}.npy".format(n))
         self.input_shape = np.load("saved/in{}.npy".format(n))
+        # self.n_features = np.load("saved/nc{}.npy".format(n))
         # self.xs = np.load("saved/xs{}.npy".format(n))
         # self.ys = np.load("saved/ys{}.npy".format(n))
 
@@ -581,19 +448,19 @@ class Layer():
         mask = self.get_mask()
 
         K = V
-        # if self.equalize:
-        #     K = np.matmul(np.diag(1/np.sqrt(S / np.average(S)) / std), K)
+        if self.equalize:
+            K = np.matmul(np.diag(1/np.sqrt(S / np.average(S)) / std), K)
         # else:
-        K = K / (np.count_nonzero(mask) / np.sum(1 / mask))
+        #     K = K / (np.count_nonzero(mask) / np.sum(1 / mask))
         bias_forward = -tf.squeeze(tf.matmul(K, tf.expand_dims(mean_p, axis=-1)))
         K = tf.reshape(K, (V.shape[0], ksize[0], ksize[1], Cin))
         K = tf.transpose(K, (1, 2, 3, 0))
 
         K_T = tf.transpose(V)
-        # if self.equalize:
-        #     K_T = np.matmul(K_T, np.diag(np.sqrt(S / np.average(S)) * std))
+        if self.equalize:
+            K_T = np.matmul(K_T, np.diag(np.sqrt(S / np.average(S)) * std))
         # else:
-        K_T = K_T * (np.count_nonzero(mask) / np.sum(1 / mask))
+        #     K_T = K_T * (np.count_nonzero(mask) / np.sum(1 / mask))
         bias_backward = mean_p
         bias_backward = tf.reshape(bias_backward, (ksize[0], ksize[1], Cin, 1))
         # bias_backward /= np.expand_dims(mask, axis=(-1, -2))
