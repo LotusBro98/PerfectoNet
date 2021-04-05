@@ -13,7 +13,8 @@ N_LAYERS = 6
 #
 # EPS_START = 2e-2
 # EPS_END = 2e-2
-EPS = [2e-2, 2e-2, 1e-2, 5e-2, 2e-2, 2e-2]
+EPS = [0.01, 0.01, 0.01, 0.3, 0.3, 0.3]
+# EPS = [0.01] * 6
 
 
 SIZE = 2**(N_LAYERS + 1) - 1

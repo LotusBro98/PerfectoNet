@@ -250,6 +250,8 @@ def gkern(kernlen=21, nsig=3):
 
 
 def show_common_distributions(dataset, eps=0.25):
+    if isinstance(dataset, tf.Tensor):
+        dataset = dataset.numpy()
     approx_n_opt = int(math.ceil(np.sqrt(len(dataset)) * eps))
     approx_n_check = 32
     approx_n_show = 32
