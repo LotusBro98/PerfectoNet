@@ -104,8 +104,10 @@ class Layer():
 
         self.get_2_order_kernel(x)
         # x = x[:, :, :, :n_features]
-        print("Polar coordinates...")
+        print("Slice...")
         x = self._forward_2_order(x, show_plow=True)
+
+        # show_common_distributions(x)
 
         self.kernel_backward /= np.expand_dims(self.get_mask(), axis=(-1, -2))
         self.bias_backward /= np.expand_dims(self.get_mask(), axis=(-1, -2))
@@ -126,6 +128,7 @@ class Layer():
             batch = xp[i: i + batch_size]
             batch = batch - mean
 
+            batch = tf.sign(batch) * tf.pow(tf.abs(batch), 1)
             batch_cov = tf.matmul(tf.expand_dims(batch, axis=-1), tf.expand_dims(batch, axis=-2))
             batch_cov = tf.reduce_sum(batch_cov, axis=0)
 
@@ -139,35 +142,44 @@ class Layer():
         if eps is None:
             return cor
 
-        # print("Counting peak std...")
-        # xp1 = np.matmul(V, np.expand_dims(xp - mean, axis=-1)).squeeze(-1)
-        # peak_std = get_std_by_peak(xp1)
-        # print(peak_std)
-        # peak_std = np.stack([np.std(xp1[np.abs(xp1[:,i]) < peak_std[i]]) for i in range(xp1.shape[-1])], axis=-1)
-        # print(peak_std)
-        peak_std = np.sqrt(S)
-        take_channels = np.argsort(peak_std)[::-1]
+        if eps > 0:
+            # print("Counting peak std...")
+            # xp1 = np.matmul(V, np.expand_dims(xp - mean, axis=-1)).squeeze(-1)
+            # peak_std = get_std_by_peak(xp1)
+            # print(peak_std)
+            # peak_std = np.stack([np.std(xp1[np.abs(xp1[:,i]) < peak_std[i]]) for i in range(xp1.shape[-1])], axis=-1)
+            # print(peak_std)
+            peak_std = np.sqrt(S)
+            take_channels = np.argsort(peak_std)[::-1]
 
-        n_features = np.count_nonzero(peak_std >= eps)
-        n_features = max(1, n_features)
+            n_features = np.count_nonzero(peak_std >= eps)
+            n_features = max(1, n_features)
 
-        # plt.plot(np.log(np.sort(peak_std)[::-1]))
-        # plt.plot(np.log(collect_std[::-1]))
-        # plt.plot(np.log(np.ones_like(S) * eps))
+            plt.plot(np.log(np.sort(peak_std)[::-1]))
+            # plt.plot(np.log(collect_std[::-1]))
+            plt.plot(np.log(np.ones_like(S) * eps))
 
-        K = np.take(V, take_channels, axis=0)[:n_features]
+            take_channels = take_channels[:n_features]
+        else:
+            take_channels = list(range(len(S)))
+
+        K = np.take(V, take_channels, axis=0)
         return K, mean
 
-    def get_outliers(self, x, scale=1):
+    def get_outliers(self, x, frac=0.5):
         if isinstance(x, tf.Tensor):
             x = x.numpy()
         x = flatten(x)
-        # peak_std = get_std_by_peak(x, 0.5)
-        peak_std = np.std(x, axis=0)
-        norm = np.linalg.norm(x / peak_std, axis=-1)# / x.shape[-1]
-        norm_avg = np.average(norm, axis=0)
-        inside = x[norm < scale * norm_avg, :]
-        outside = x[norm >= scale * norm_avg, :]
+        peak_std = get_std_by_peak(x)
+        # peak_std = np.std(x, axis=0)
+        peak_std[peak_std == 0] = 1
+        norm = np.linalg.norm(x / peak_std, axis=-1) / np.sqrt(x.shape[-1])
+        idx = np.argsort(norm)
+        div = int(frac * len(norm))
+        # inside = x[norm < norm_thresh]
+        # outside = x[norm >= norm_thresh]
+        inside = np.take(x, idx[:div], axis=0)
+        outside = np.take(x, idx[div:], axis=0)
         # peak_std = np.std(x, axis=0)
         # rest = x
         # clusters = []
@@ -181,42 +193,74 @@ class Layer():
         # clusters = np.concatenate(clusters, axis=0)
         return inside, outside
 
-    def get_2_order_kernel(self, x, odd=0.01):
+    def get_2_order_kernel(self, x, n_groups=4, odd=0.01):
         x = flatten(x)
         rest = x
         groups = []
-        while len(rest) > (odd * len(x)):
-            K, mean = self.get_cov_svd(rest, eps=0)
-            xi = matmul(K, rest - mean)
-            inside, outside = self.get_outliers(xi)
-            inside = matmul(K.T, inside) + mean
-            outside = matmul(K.T, outside) + mean
+        peak_std = get_std_by_peak(x, 0.8)
+        n_features = np.count_nonzero(peak_std >= self.eps)
+        print(n_features)
+        for i in range(n_groups):
+            frac = 0.5
+            rest1 = rest
+            for i in range(5):
+            # while True:
+                K, mean = self.get_cov_svd(rest1, eps=0)
+                xi = matmul(K, rest1 - mean)
+                inside, outside = self.get_outliers(xi, frac=frac)
+                print(len(inside), len(outside), len(xi))
+                inside = matmul(K.T, inside) + mean
+                outside = matmul(K.T, outside) + mean
 
+                K1, m1 = self.get_cov_svd(inside, eps=0)
+                peak_std = np.std(matmul(K1, inside - m1), axis=0)
+                n1 = np.count_nonzero(peak_std >= self.eps)
+                if n1 <= n_features:
+                    break
+                frac *= 0.5
+                rest1 = inside
 
             groups.append(inside)
             rest = outside
 
             print(len(inside), len(rest), len(x))
 
-            # if len(inside) < odd * len(x):
-            #     break
+            if len(rest) < odd * len(x):
+                break
 
         Ks = []
         ms = []
+        nc = []
         for group in groups:
-            K, mean = self.get_cov_svd(group, eps=self.eps)
+            K, mean = self.get_cov_svd(group, eps=0)
+            peak_std = get_std_by_peak(matmul(K, group - mean))
+            # collect_std = np.sqrt(np.cumsum(np.square(np.sort(peak_std))))
+            take_channels = np.argsort(peak_std)[::-1]
+            n_features = np.count_nonzero(peak_std >= self.eps)
+            K = np.take(K, take_channels, axis=0)
+
+            plt.plot(np.log(np.sort(peak_std)[::-1]))
+            plt.plot(np.log(np.ones_like(peak_std) * self.eps))
+
             Ks.append(K)
             ms.append(mean)
+            nc.append(n_features)
+        plt.show()
 
-        maxlen = max([K.shape[0] for K in Ks])
-        Ks = [np.pad(K, pad_width=((0, maxlen - K.shape[0]), (0,0))) for K in Ks]
+        n_features = max(nc)
+
+        # maxlen = max([K.shape[0] for K in Ks])
+        # Ks = [np.pad(K, pad_width=((0, maxlen - K.shape[0]), (0,0))) for K in Ks]
         self.K2 = np.stack(Ks, axis=0)
+        self.K2 = self.K2[:,:n_features,:]
         self.m2 = np.stack(ms, axis=0)
         print(self.K2.shape)
 
 
 
     def _forward_2_order(self, x, do_matmul=True, show_plow=False):
+        n_groups = self.K2.shape[0]
+
         x = tf.expand_dims(x, axis=-2) - self.m2
         xf = tf.matmul(self.K2, tf.expand_dims(x, axis=-1))
         xb = tf.matmul(tf.transpose(self.K2, (0, 2, 1)), xf)
@@ -224,11 +268,19 @@ class Layer():
         xb = tf.squeeze(xb, axis=-1)
         closest = tf.argmin(tf.linalg.norm(x - xb, axis=-1), axis=-1)
         xf = tf.gather(xf, closest, axis=-2, batch_dims=3)
-        xf = tf.concat([xf, tf.cast(tf.expand_dims(closest, axis=-1), dtype=tf.float32)], axis=-1)
+        # closest = tf.one_hot(closest, n_groups)
+        closest = tf.cast(tf.expand_dims(closest, axis=-1), dtype=tf.float32)
+        closest = closest * 3
+        xf = tf.concat([xf, closest], axis=-1)
         return xf
 
     def _backward_2_order(self, x):
-        closest = tf.cast(tf.round(x[:,:,:,-1]), dtype=tf.int32)
+        # n_groups = self.K2.shape[0]
+        closest = x[:,:,:,-1] / 3
+        # closest = x[:,:,:,-n_groups:]
+        # closest = tf.argmax(closest, axis=-1)
+        closest = tf.cast(tf.round(closest), dtype=tf.int32)
+        # xf = x[:,:,:,:-n_groups]
         xf = x[:,:,:,:-1]
         xf = tf.expand_dims(xf, axis=-2)
         xf = tf.expand_dims(xf, axis=-1)
