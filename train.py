@@ -5,7 +5,7 @@ from distribution import *
 from model import Model
 
 
-DATASET_SIZE = 20
+DATASET_SIZE = 50
 BATCH_SIZE = 4
 TEST_SIZE = 4
 
@@ -13,8 +13,8 @@ N_LAYERS = 6
 #
 # EPS_START = 2e-2
 # EPS_END = 2e-2
-EPS = [0.01, 0.01, 0.01, 0.3, 0.3, 0.3]
-# EPS = [0.01] * 6
+EPS = [0.05, 0.05, 0.1, 0.2, 0.3, 0.4]
+# EPS = [0.15] * 6
 
 
 SIZE = 2**(N_LAYERS + 1) - 1

@@ -12,14 +12,16 @@ class Model():
 
         # eps = np.exp(np.linspace(np.log(eps_start), np.log(eps_end), n_layers * 2))
 
-        for i in range(3):
+        for i in range(5):
             # eps1 = eps[2*i]
             # eps2 = eps[2*i+1]
             eps1 = eps[i]
+            eps2 = eps1
 
-            # self.layers.append(Layer(ksize=3, stride=2, orient="ver", eps=eps1, distribution_approx_n=approx_n))
-            # self.layers.append(Layer(ksize=3, stride=2, orient="hor", eps=eps2, distribution_approx_n=approx_n))
-            self.layers.append(Layer(ksize=3, stride=2, orient="both", eps=eps1, distribution_approx_n=approx_n))
+            self.layers.append(Layer(ksize=3, stride=2, orient="ver", eps=eps1, distribution_approx_n=approx_n))
+            self.layers.append(Layer(ksize=3, stride=2, orient="hor", eps=eps2, distribution_approx_n=approx_n))
+            # self.layers.append(Layer(ksize=3, stride=2, orient="both", eps=eps1, distribution_approx_n=approx_n))
+            # self.layers.append(Layer(ksize=3, stride=1, orient="both", eps=eps1, distribution_approx_n=approx_n))
 
     def fit(self, dataset, batch_size=1):
         x = dataset

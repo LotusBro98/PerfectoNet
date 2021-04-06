@@ -19,7 +19,9 @@ import scipy.stats as st
 #     plt.show()
 
 def show_distribution(dataset, approx_n=64, sigma=2):
-    dataset = np.reshape(dataset, [dataset.shape[0] * dataset.shape[1] * dataset.shape[2], dataset.shape[3]])
+    dataset = flatten(dataset)
+    if isinstance(dataset, tf.Tensor):
+        dataset = dataset.numpy()
     density = np.zeros((dataset.shape[-1], approx_n,))
     mean = np.average(dataset, axis=0)
     std = np.sqrt(np.sum(np.square(np.std(dataset, axis=0))))
@@ -93,18 +95,39 @@ def get_non_peak_channels(dataset, sigma=0.05, eps=0.1):
     n_channels = np.count_nonzero(count < eps)
     return indices, n_channels
 
+def flatten(x):
+    if len(x.shape) == 2:
+        return x
+    elif len(x.shape) == 1:
+        if isinstance(x, tf.Tensor):
+            x = tf.expand_dims(x, axis=0)
+        else:
+            x = np.expand_dims(x, axis=0)
+
+    new_shape = [np.product(x.shape[:-1]), x.shape[-1]]
+    if isinstance(x, tf.Tensor):
+        x = tf.reshape(x, new_shape)
+    else:
+        x = np.reshape(x, new_shape)
+    return x
 
 def get_std_by_peak(dataset, prob=0.68):
     sigma = scipy.special.erfinv(prob) * np.sqrt(2)
-    if len(dataset.shape) == 4:
-        dataset = tf.reshape(dataset, [dataset.shape[0] * dataset.shape[1] * dataset.shape[2], dataset.shape[3]])
+    dataset = flatten(dataset)
     mean = tf.reduce_mean(dataset, axis=0)
     absdiff = tf.abs(dataset - mean)
-    absdiff = tf.sort(absdiff, axis=0)
+    absdiff = np.sort(absdiff, axis=0)
 
-    peak_std = sigma * absdiff[int(len(absdiff) * prob)]
+    # peak_std = sigma * absdiff[int(len(absdiff) * prob)]
+    peak_std = absdiff[int(len(absdiff) * prob)]
+
+    # peak_std = tf.stack([tf.math.reduce_std(dataset[:,i][tf.abs(dataset[:,i]) < peak_std[i]]) for i in range(dataset.shape[-1])], axis=-1)
 
     return peak_std
+
+
+def matmul(A, x):
+    return tf.squeeze(tf.matmul(A, tf.expand_dims(x, axis=-1)), axis=-1)
 
 
 def build_distribution(dataset, approx_n=100, equal=True, weights=None):
@@ -208,8 +231,8 @@ def remap_distribution(dataset, xs, ys):
 
 
 def common_distribution(dataset, approx_n=None, c1=0, c2=1):
-    dataset = dataset[:, :, :,[c1, c2]]
-    dataset = np.reshape(dataset, [dataset.shape[0] * dataset.shape[1] * dataset.shape[2], 2])
+    dataset = flatten(dataset)
+    dataset = dataset[:,[c1, c2]]
     inds = np.argsort(dataset[:, 0])
     dataset = dataset.take(inds, axis=0).copy()
 
@@ -250,6 +273,7 @@ def gkern(kernlen=21, nsig=3):
 
 
 def show_common_distributions(dataset, eps=0.25):
+    dataset = flatten(dataset)
     if isinstance(dataset, tf.Tensor):
         dataset = dataset.numpy()
     approx_n_opt = int(math.ceil(np.sqrt(len(dataset)) * eps))
@@ -292,8 +316,8 @@ def show_common_distributions(dataset, eps=0.25):
             # print(density)
             # density = density / gkern(len(density), 2)
             # density = density[1:-1, 1:-1]
-            mean = np.average(dataset, axis=(0, 1, 2))
-            std = np.std(dataset, axis=(0, 1, 2))
+            mean = np.average(dataset, axis=0)
+            std = np.std(dataset, axis=0)
             extent = [
                 mean[j] - std[j], mean[j] + std[j],
                 mean[i] - std[i], mean[i] + std[i],
