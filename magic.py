@@ -115,27 +115,27 @@ inp[TEST_SIZE:] = remap_distribution(inp[TEST_SIZE:], xsB0, ysB0)
 
 x = model.forward(inp)
 
-print(x.shape)
-
-x_A = x[:TEST_SIZE]
-x_B = x[TEST_SIZE:]
-
-# x_A = _forward_2_order(x_A)
-x_A = project_B.forward(x_A)
-x_A = (x_A - avgA_B) / stdA_B * stdB + avgB
-# x_A = x_A / np.linalg.norm(x_A, axis=-1, keepdims=True) * normB
-x_A = project_B.backward(x_A)
-# x_A = _backward_2_order(x_A)
-
-
-# x_B = _forward_2_order(x_B)
-x_B = project_A.forward(x_B)
-x_B = (x_B - avgB_A) / stdB_A * stdA + avgA
-# x_B = x_B / np.linalg.norm(x_B, axis=-1, keepdims=True) * normA
-x_B = project_A.backward(x_B)
-# x_B = _backward_2_order(x_B)
-
-x = np.concatenate([x_A, x_B], axis=0)
+# print(x.shape)
+#
+# x_A = x[:TEST_SIZE]
+# x_B = x[TEST_SIZE:]
+#
+# # x_A = _forward_2_order(x_A)
+# x_A = project_B.forward(x_A)
+# x_A = (x_A - avgA_B) / stdA_B * stdB + avgB
+# # x_A = x_A / np.linalg.norm(x_A, axis=-1, keepdims=True) * normB
+# x_A = project_B.backward(x_A)
+# # x_A = _backward_2_order(x_A)
+#
+#
+# # x_B = _forward_2_order(x_B)
+# x_B = project_A.forward(x_B)
+# x_B = (x_B - avgB_A) / stdB_A * stdA + avgA
+# # x_B = x_B / np.linalg.norm(x_B, axis=-1, keepdims=True) * normA
+# x_B = project_A.backward(x_B)
+# # x_B = _backward_2_order(x_B)
+#
+# x = np.concatenate([x_A, x_B], axis=0)
 
 x = model.backward(x, BATCH_SIZE)
 

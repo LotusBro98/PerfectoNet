@@ -118,8 +118,8 @@ def get_std_by_peak(dataset, prob=0.68):
     absdiff = tf.abs(dataset - mean)
     absdiff = np.sort(absdiff, axis=0)
 
-    # peak_std = sigma * absdiff[int(len(absdiff) * prob)]
-    peak_std = absdiff[int(len(absdiff) * prob)]
+    peak_std = absdiff[int(len(absdiff) * prob)] / sigma
+    # peak_std = absdiff[int(len(absdiff) * prob)]
 
     # peak_std = tf.stack([tf.math.reduce_std(dataset[:,i][tf.abs(dataset[:,i]) < peak_std[i]]) for i in range(dataset.shape[-1])], axis=-1)
 
@@ -242,7 +242,7 @@ def common_distribution(dataset, approx_n=None, c1=0, c2=1):
     density = np.zeros((approx_n, approx_n))
 
     mean = np.average(dataset, axis=0)
-    std = np.std(dataset, axis=0)
+    std = np.std(dataset, axis=0) * 3
     # std = (np.max(dataset, axis=0) - np.min(dataset, axis=0)) / 2
 
     checks = np.linspace(mean[0] - std[0], mean[0] + std[0], approx_n + 1)
@@ -312,6 +312,7 @@ def show_common_distributions(dataset, eps=0.25):
             #     continue
 
             density = common_distribution(dataset, approx_n=approx_n_show, c1=i, c2=j)
+            density = np.log(density + 1e4)
             # density = density_equal
             # print(density)
             # density = density / gkern(len(density), 2)
@@ -324,7 +325,7 @@ def show_common_distributions(dataset, eps=0.25):
             ]
             ax = fig.add_subplot(N, N, i * N + j + 1)
             ax.imshow(density[::-1, :],
-                       vmax=3 * np.sqrt(np.average(np.square(density))),
+                       # vmax=3 * np.sqrt(np.average(np.square(density))),
                        extent=extent,
                        aspect=(extent[1] - extent[0]) / (extent[3] - extent[2])
                        )

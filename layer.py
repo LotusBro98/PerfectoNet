@@ -115,11 +115,11 @@ class Layer():
         return x
 
 
-    def get_cov_svd(self, xp, eps=None, batch_size_cells=100000000):
+    def get_cov_svd(self, xp, eps=None, use_cor=False, batch_size_cells=100000000):
         xp = flatten(xp)
 
-        mean = np.average(xp, axis=0)
-        std = np.std(xp, axis=0)
+        mean = tf.reduce_mean(xp, axis=0)
+        std = tf.math.reduce_std(xp, axis=0)
 
         N = 0
         cov = 0
@@ -128,7 +128,9 @@ class Layer():
             batch = xp[i: i + batch_size]
             batch = batch - mean
 
-            batch = tf.sign(batch) * tf.pow(tf.abs(batch), 1)
+            if use_cor:
+                batch = tf.pow(tf.abs(batch), 2)# * tf.sign(batch)
+
             batch_cov = tf.matmul(tf.expand_dims(batch, axis=-1), tf.expand_dims(batch, axis=-2))
             batch_cov = tf.reduce_sum(batch_cov, axis=0)
 
@@ -137,49 +139,60 @@ class Layer():
         cov = cov / N
         cor = cov / np.outer(std, std)
 
+        # if use_cor:
+        #   U, S, V = np.linalg.svd(cor)
+        # else:
         U, S, V = np.linalg.svd(cov)
 
         if eps is None:
             return cor
 
-        if eps > 0:
-            # print("Counting peak std...")
-            # xp1 = np.matmul(V, np.expand_dims(xp - mean, axis=-1)).squeeze(-1)
-            # peak_std = get_std_by_peak(xp1)
-            # print(peak_std)
-            # peak_std = np.stack([np.std(xp1[np.abs(xp1[:,i]) < peak_std[i]]) for i in range(xp1.shape[-1])], axis=-1)
-            # print(peak_std)
-            peak_std = np.sqrt(S)
-            take_channels = np.argsort(peak_std)[::-1]
+        # print("Counting peak std...")
+        xp1 = np.matmul(V, np.expand_dims(xp - mean, axis=-1)).squeeze(-1)
+        peak_std = get_std_by_peak(xp1)
+        # print(peak_std)
+        # peak_std = np.stack([np.std(xp1[np.abs(xp1[:,i]) < peak_std[i]]) for i in range(xp1.shape[-1])], axis=-1)
+        # print(peak_std)
+        # peak_std = np.sqrt(S)
+        take_channels = np.argsort(peak_std)[::-1]
 
-            n_features = np.count_nonzero(peak_std >= eps)
-            n_features = max(1, n_features)
+        n_features = np.count_nonzero(peak_std >= eps)
+        n_features = max(1, n_features)
 
-            plt.plot(np.log(np.sort(peak_std)[::-1]))
-            # plt.plot(np.log(collect_std[::-1]))
-            plt.plot(np.log(np.ones_like(S) * eps))
+        # if eps is not None and eps > 0:
+        #     plt.plot(np.log(np.sort(peak_std)[::-1]))
+        #     # plt.plot(np.log(collect_std[::-1]))
+        #     plt.plot(np.log(np.ones_like(S) * eps))
+        #     plt.show()
 
-            take_channels = take_channels[:n_features]
-        else:
-            take_channels = list(range(len(S)))
-
-        K = np.take(V, take_channels, axis=0)
+        K = np.take(V, take_channels, axis=0)[:n_features]
         return K, mean
 
-    def get_outliers(self, x, frac=0.5):
+    def get_outliers(self, x, prob_check=0.1, prob_take=0.999, frac=0.01):
         if isinstance(x, tf.Tensor):
             x = x.numpy()
         x = flatten(x)
-        peak_std = get_std_by_peak(x)
+        peak_std = get_std_by_peak(x, prob_check)
+        scale = scipy.special.erfinv(prob_take) * np.sqrt(2)
         # peak_std = np.std(x, axis=0)
-        peak_std[peak_std == 0] = 1
-        norm = np.linalg.norm(x / peak_std, axis=-1) / np.sqrt(x.shape[-1])
-        idx = np.argsort(norm)
-        div = int(frac * len(norm))
-        # inside = x[norm < norm_thresh]
-        # outside = x[norm >= norm_thresh]
-        inside = np.take(x, idx[:div], axis=0)
-        outside = np.take(x, idx[div:], axis=0)
+        # if frac is not None:
+        #   norm = np.linalg.norm(x / peak_std, axis=-1)# / x.shape[-1]
+        #   idx = np.argsort(norm)
+        #   div = int(frac * len(idx))
+        #   inside = x[idx[:div], :]
+        #   outside = x[idx[div:], :]
+        # else:
+        outside_all = []
+        rest = x
+        for i in range(x.shape[-1]-1, 0, -1):
+        # for i in range(x.shape[-1]):
+          inside = rest[np.abs(rest[:,i]) < peak_std[i] * scale,:]
+          outside = rest[np.abs(rest[:,i]) >= peak_std[i] * scale,:]
+          rest = inside
+          outside_all.append(outside)
+          if len(inside) < frac * len(x):
+            break
+        outside = np.concatenate(outside_all, axis=0)
         # peak_std = np.std(x, axis=0)
         # rest = x
         # clusters = []
@@ -193,101 +206,139 @@ class Layer():
         # clusters = np.concatenate(clusters, axis=0)
         return inside, outside
 
-    def get_2_order_kernel(self, x, n_groups=4, odd=0.01):
+    def get_2_order_kernel(self, x, odd=0.01, batch_size=16):
+        # x = self.normalize(x)
         x = flatten(x)
+        self.channel_std = np.std(x, axis=0)
+        min_len = int(odd * len(x))
+        # min_len = max(min_len, x.shape[-1])
+        # x = self.clip(x)
         rest = x
         groups = []
-        peak_std = get_std_by_peak(x, 0.8)
-        n_features = np.count_nonzero(peak_std >= self.eps)
-        print(n_features)
-        for i in range(n_groups):
-            frac = 0.5
+        # show_common_distributions(rest[:,:8])
+        while len(rest) > min_len:
             rest1 = rest
             for i in range(5):
-            # while True:
-                K, mean = self.get_cov_svd(rest1, eps=0)
-                xi = matmul(K, rest1 - mean)
-                inside, outside = self.get_outliers(xi, frac=frac)
-                print(len(inside), len(outside), len(xi))
-                inside = matmul(K.T, inside) + mean
-                outside = matmul(K.T, outside) + mean
-
-                K1, m1 = self.get_cov_svd(inside, eps=0)
-                peak_std = np.std(matmul(K1, inside - m1), axis=0)
-                n1 = np.count_nonzero(peak_std >= self.eps)
-                if n1 <= n_features:
-                    break
-                frac *= 0.5
-                rest1 = inside
+              K, mean = self.get_cov_svd(rest1, eps=0, use_cor=True)
+              xi = matmul(K, rest - mean)
+              inside, outside = self.get_outliers(xi, frac=(min_len / len(xi)))
+              inside = matmul(K.T, inside) + mean
+              outside = matmul(K.T, outside) + mean
+              rest1 = inside
+            # xi = matmul(K, rest - mean)
+            # inside, outside = self.get_outliers(xi)
+            # inside = matmul(K.T, inside) + mean
+            # outside = matmul(K.T, outside) + mean
 
             groups.append(inside)
             rest = outside
 
             print(len(inside), len(rest), len(x))
 
-            if len(rest) < odd * len(x):
-                break
+            # show_common_distributions(rest[:,:8])
+
+            # if len(inside) < odd * len(x):
+            #     break
+        groups.append(rest)
 
         Ks = []
         ms = []
-        nc = []
         for group in groups:
-            K, mean = self.get_cov_svd(group, eps=0)
-            peak_std = get_std_by_peak(matmul(K, group - mean))
-            # collect_std = np.sqrt(np.cumsum(np.square(np.sort(peak_std))))
-            take_channels = np.argsort(peak_std)[::-1]
-            n_features = np.count_nonzero(peak_std >= self.eps)
-            K = np.take(K, take_channels, axis=0)
-
-            plt.plot(np.log(np.sort(peak_std)[::-1]))
-            plt.plot(np.log(np.ones_like(peak_std) * self.eps))
-
+            # if len(group) < odd * len(x):
+              # continue
+            K, mean = self.get_cov_svd(group, eps=self.eps, use_cor=False)
+            # xi = matmul(K, group - mean)
+            # inside, outside = self.get_outliers(xi, prob=0.68, frac=0.3)
+            # if len(inside) == 0:
+            #   continue
+            # inside = matmul(K.T, inside) + mean
+            # outside = matmul(K.T, outside) + mean
+            # K, mean = self.get_cov_svd(inside, eps=self.eps)
             Ks.append(K)
             ms.append(mean)
-            nc.append(n_features)
-        plt.show()
+            # plt.imshow(np.abs(K))
+            # plt.show()
 
-        n_features = max(nc)
+        print([K.shape[0] for K in Ks])
 
-        # maxlen = max([K.shape[0] for K in Ks])
-        # Ks = [np.pad(K, pad_width=((0, maxlen - K.shape[0]), (0,0))) for K in Ks]
+        lens = [K.shape[0] for K in Ks]
+        maxlen = int(np.average(lens))
+
+        Ks = [np.pad(K[:maxlen], pad_width=((0, maxlen - K[:maxlen].shape[0]), (0,0))) for K in Ks]
         self.K2 = np.stack(Ks, axis=0)
-        self.K2 = self.K2[:,:n_features,:]
         self.m2 = np.stack(ms, axis=0)
         print(self.K2.shape)
 
+        std = 0
+        N = 0
+        for i in range(0, len(x), batch_size):
+            x_batch = x[i:i+batch_size]
+            x_batch = tf.expand_dims(x_batch, axis=-2) - self.m2
+            xf = tf.squeeze(tf.matmul(self.K2, tf.expand_dims(x_batch, axis=-1)), axis=-1)
+            std += tf.reduce_sum(tf.square(xf), axis=0)
+            N += len(xf)
+        std = np.sqrt(std / N)
+
+        idx = np.argsort(std, axis=1)[:,::-1]
+        self.K2 = tf.gather(self.K2, idx, axis=1, batch_dims=1)
+        std = tf.gather(std, idx, axis=1, batch_dims=1).numpy()
+
+        std[std == 0] = np.min(std[std != 0])
+        avg_std = tf.exp(tf.reduce_mean(tf.math.log(std), axis=0, keepdims=True))
+        coeff = tf.expand_dims(avg_std / std, axis=-1)
+        self.K2_T = tf.transpose(self.K2 / coeff, (0, 2, 1))
+        self.K2 = self.K2 * coeff
 
 
-    def _forward_2_order(self, x, do_matmul=True, show_plow=False):
+
+
+    def _forward_2_order(self, x, do_matmul=True, show_plow=False, batch_size=16):
         n_groups = self.K2.shape[0]
+        # x = self.clip(x)
 
-        x = tf.expand_dims(x, axis=-2) - self.m2
-        xf = tf.matmul(self.K2, tf.expand_dims(x, axis=-1))
-        xb = tf.matmul(tf.transpose(self.K2, (0, 2, 1)), xf)
-        xf = tf.squeeze(xf, axis=-1)
-        xb = tf.squeeze(xb, axis=-1)
-        closest = tf.argmin(tf.linalg.norm(x - xb, axis=-1), axis=-1)
-        xf = tf.gather(xf, closest, axis=-2, batch_dims=3)
-        # closest = tf.one_hot(closest, n_groups)
-        closest = tf.cast(tf.expand_dims(closest, axis=-1), dtype=tf.float32)
-        closest = closest * 3
-        xf = tf.concat([xf, closest], axis=-1)
+        xf_all = []
+        for i in range(0, len(x), batch_size):
+            x_batch = x[i:i+batch_size]
+            # x_batch = self.normalize(x_batch)
+            x_batch = tf.expand_dims(x_batch, axis=-2) - self.m2
+            xf = tf.matmul(self.K2, tf.expand_dims(x_batch, axis=-1))
+            xb = tf.matmul(self.K2_T, xf)
+            xf = tf.squeeze(xf, axis=-1)
+            xb = tf.squeeze(xb, axis=-1)
+            closest = tf.argmin(tf.linalg.norm(x_batch - xb, axis=-1), axis=-1)
+            xf = tf.gather(xf, closest, axis=-2, batch_dims=3)
+            # closest = tf.one_hot(closest, n_groups)
+            closest = tf.cast(tf.expand_dims(closest, axis=-1), dtype=tf.float32)
+            mul = np.sqrt(np.sum(np.square(self.channel_std)))
+            closest = closest * mul
+            xf = tf.concat([xf, closest], axis=-1)
+            xf_all.append(xf)
+        xf = tf.concat(xf_all, axis=0)
         return xf
 
-    def _backward_2_order(self, x):
-        # n_groups = self.K2.shape[0]
-        closest = x[:,:,:,-1] / 3
-        # closest = x[:,:,:,-n_groups:]
-        # closest = tf.argmax(closest, axis=-1)
-        closest = tf.cast(tf.round(closest), dtype=tf.int32)
-        # xf = x[:,:,:,:-n_groups]
-        xf = x[:,:,:,:-1]
-        xf = tf.expand_dims(xf, axis=-2)
-        xf = tf.expand_dims(xf, axis=-1)
-        xb = tf.matmul(tf.transpose(self.K2, (0, 2, 1)), xf)
-        xb = tf.squeeze(xb, axis=-1)
-        xb = xb + self.m2
-        xb = tf.gather(xb, closest, axis=-2, batch_dims=3)
+    def _backward_2_order(self, x, batch_size=16):
+        xb_all = []
+        for i in range(0, len(x), batch_size):
+            x_batch = x[i:i+batch_size]
+            n_groups = self.K2.shape[0]
+            # closest = x_batch[:,:,:,-n_groups:]
+            mul = np.sqrt(np.sum(np.square(self.channel_std)))
+            closest = x_batch[:,:,:,-1] / mul
+            # closest = tf.argmax(closest, axis=-1)
+            closest = tf.cast(tf.round(closest), dtype=tf.int32)
+            # xf = x_batch[:,:,:,:-n_groups]
+            xf = x_batch[:,:,:,:-1]
+            xf = tf.expand_dims(xf, axis=-2)
+            xf = tf.expand_dims(xf, axis=-1)
+            xb = tf.matmul(self.K2_T, xf)
+            xb = tf.squeeze(xb, axis=-1)
+            xb = xb + self.m2
+            xb = tf.gather(xb, closest, axis=-2, batch_dims=3)
+            # xb = self.clip(xb)
+            # xb = self.denormalize(xb)
+
+            xb_all.append(xb)
+        xb = tf.concat(xb_all, axis=0)
         return xb
 
     def calc_minor_matrix(self, x, std, n_features):
@@ -328,10 +379,21 @@ class Layer():
 
         return x
 
+    def normalize(self, x):
+        norm = tf.linalg.norm(x, axis=-1, keepdims=True)
+        x = x / norm
+        x = tf.concat([norm, x], axis=-1)
+        return x
+
+    def denormalize(self, x):
+        norm = x[:,:,:,:1]
+        x = x[:,:,:,1:] * norm
+        return x
+
     def clip(self, x):
         sigma = scipy.special.erfinv(1 - self.clip_loss) * np.sqrt(2)
-        std = self.channel_std
-        # std = np.sqrt(np.sum(self.channel_std))
+        # std = self.channel_std
+        std = np.sqrt(np.sum(self.channel_std))
 
         x = x / std
         # x = x.numpy()
@@ -388,7 +450,7 @@ class Layer():
         # np.save("saved/Km{}".format(n), self.Km)
         np.save("saved/K2{}".format(n), self.K2)
         np.save("saved/m2{}".format(n), self.m2)
-        # np.save("saved/std{}".format(n), self.channel_std)
+        np.save("saved/std{}".format(n), self.channel_std)
         np.save("saved/in{}".format(n), self.input_shape)
         # np.save("saved/nc{}".format(n), self.n_features)
         # np.save("saved/xs{}".format(n), self.xs)
@@ -402,7 +464,7 @@ class Layer():
         # self.Km = np.load("saved/Km{}.npy".format(n))
         self.K2 = np.load("saved/K2{}.npy".format(n))
         self.m2 = np.load("saved/m2{}.npy".format(n))
-        # self.channel_std = np.load("saved/std{}.npy".format(n))
+        self.channel_std = np.load("saved/std{}.npy".format(n))
         self.input_shape = np.load("saved/in{}.npy".format(n))
         # self.n_features = np.load("saved/nc{}.npy".format(n))
         # self.xs = np.load("saved/xs{}.npy".format(n))

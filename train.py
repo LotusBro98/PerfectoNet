@@ -5,7 +5,7 @@ from distribution import *
 from model import Model
 
 
-DATASET_SIZE = 40
+DATASET_SIZE = 20
 BATCH_SIZE = 4
 TEST_SIZE = 4
 
@@ -13,7 +13,7 @@ N_LAYERS = 6
 #
 # EPS_START = 2e-2
 # EPS_END = 2e-2
-EPS = [0.2, 0.2, 0.2, 0.2, 0.3, 0.4]
+EPS = [0.3, 0.2, 0.3, 0.3, 0.3, 0.2]
 # EPS = np.exp(np.linspace(np.log(0.05), np.log(1), N_LAYERS))
 # EPS = [0.1] * 6
 
@@ -34,7 +34,7 @@ def load_image(filename, image_size=512):
 
 images = []
 pathsA = list(glob.glob("trainA/*.png"))
-pathsB = list(glob.glob("trainB/*.png"))
+pathsB = list(glob.glob("trainA/*.png"))
 random.shuffle(pathsA)
 random.shuffle(pathsB)
 paths = pathsA[:DATASET_SIZE] + pathsB[:DATASET_SIZE]
