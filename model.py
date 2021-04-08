@@ -12,7 +12,7 @@ class Model():
 
         # eps = np.exp(np.linspace(np.log(eps_start), np.log(eps_end), n_layers * 2))
 
-        for i in range(3):
+        for i in range(1):
             # eps1 = eps[2*i]
             # eps2 = eps[2*i+1]
             eps1 = eps[i]

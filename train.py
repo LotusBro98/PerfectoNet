@@ -13,7 +13,7 @@ N_LAYERS = 6
 #
 # EPS_START = 2e-2
 # EPS_END = 2e-2
-EPS = [0.3, 0.2, 0.3, 0.3, 0.3, 0.2]
+EPS = [0.1, 0.3, 0.3, 0.3, 0.3, 0.3]
 # EPS = np.exp(np.linspace(np.log(0.05), np.log(1), N_LAYERS))
 # EPS = [0.1] * 6
 

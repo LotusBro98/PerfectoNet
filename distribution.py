@@ -241,9 +241,10 @@ def common_distribution(dataset, approx_n=None, c1=0, c2=1):
 
     density = np.zeros((approx_n, approx_n))
 
-    mean = np.average(dataset, axis=0)
-    std = np.std(dataset, axis=0) * 3
-    # std = (np.max(dataset, axis=0) - np.min(dataset, axis=0)) / 2
+    # mean = np.average(dataset, axis=0)
+    mean = (np.max(dataset, axis=0) + np.min(dataset, axis=0)) / 2
+    # std = np.std(dataset, axis=0) * 3
+    std = (np.max(dataset, axis=0) - np.min(dataset, axis=0)) / 2
 
     checks = np.linspace(mean[0] - std[0], mean[0] + std[0], approx_n + 1)
     checks1 = np.linspace(mean[1] - std[1], mean[1] + std[1], approx_n + 1)
