@@ -294,7 +294,7 @@ def show_common_distributions(dataset, eps=0.25):
     pairs = []
     for i in range(dataset.shape[-1]):
         for j in range(dataset.shape[-1]):
-            print(i, j)
+            # print(i, j)
             # if i == j:
             #     dependence_matrix[i, j] = 1
             #     # continue
@@ -318,6 +318,10 @@ def show_common_distributions(dataset, eps=0.25):
             # print(density)
             # density = density / gkern(len(density), 2)
             # density = density[1:-1, 1:-1]
+            meand = np.average(density)
+            stdd = np.std(density)
+            mind = np.min(density)
+
             mean = np.average(dataset, axis=0)
             std = np.std(dataset, axis=0)
             extent = [
@@ -326,7 +330,8 @@ def show_common_distributions(dataset, eps=0.25):
             ]
             ax = fig.add_subplot(N, N, i * N + j + 1)
             ax.imshow(density[::-1, :],
-                       # vmax=3 * np.sqrt(np.average(np.square(density))),
+                       vmax=meand + 3 * stdd,
+                       vmin=mind,
                        extent=extent,
                        aspect=(extent[1] - extent[0]) / (extent[3] - extent[2])
                        )

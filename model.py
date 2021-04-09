@@ -32,6 +32,7 @@ class Model():
                 x = layer.forward(x, batch_size)
             else:
                 x = layer.fit(x, batch_size)
+                show_common_distributions(np.concatenate([x[:, :, :, :6]], axis=-1))
             print(x.shape)
 
         return x
