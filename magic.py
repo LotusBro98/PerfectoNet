@@ -81,34 +81,34 @@ ysB0 = np.load("saved/ysB0.npy")
 x_A0 = np.load("saved/x_A0.npy")
 x_B0 = np.load("saved/x_B0.npy")
 
-project_A = Layer(ksize=1, stride=1, eps=EPS_L_A)
-project_A.fit((x_A0))
-
-project_B = Layer(ksize=1, stride=1, eps=EPS_L_B)
-project_B.fit((x_B0))
-
-x_A = project_A.forward(x_A0)
-normA = np.average(np.linalg.norm(x_A, axis=-1))
-avgA = np.average(project_A.forward(x_A0), axis=(0,1,2))
-avgA_B = np.average(project_B.forward(x_A0), axis=(0,1,2))
-stdA = np.std(project_A.forward(x_A0), axis=(0,1,2))
-stdA_B = np.std(project_B.forward(x_A0), axis=(0,1,2))
-
-x_B = project_B.forward(x_B0)
-normB = np.average(np.linalg.norm(x_B, axis=-1))
-avgB = np.average(project_B.forward(x_B0), axis=(0,1,2))
-avgB_A = np.average(project_A.forward(x_B0), axis=(0,1,2))
-stdB = np.std(project_B.forward(x_B0), axis=(0,1,2))
-stdB_A = np.std(project_A.forward(x_B0), axis=(0,1,2))
-
-x_A_B = project_B.forward(x_A0)
-print("x_A->B: {}".format(x_A_B.shape))
-
-x_B_A = project_A.forward(x_B0)
-print("x_B->A: {}".format(x_B_A.shape))
-
-xsA_A, ysA_A = build_distribution(project_A.forward(x_A0), equal=True)
-xsB_B, ysB_B = build_distribution(project_B.forward(x_B0), equal=True)
+# project_A = Layer(ksize=1, stride=1, eps=EPS_L_A)
+# project_A.fit((x_A0))
+#
+# project_B = Layer(ksize=1, stride=1, eps=EPS_L_B)
+# project_B.fit((x_B0))
+#
+# x_A = project_A.forward(x_A0)
+# normA = np.average(np.linalg.norm(x_A, axis=-1))
+# avgA = np.average(project_A.forward(x_A0), axis=(0,1,2))
+# avgA_B = np.average(project_B.forward(x_A0), axis=(0,1,2))
+# stdA = np.std(project_A.forward(x_A0), axis=(0,1,2))
+# stdA_B = np.std(project_B.forward(x_A0), axis=(0,1,2))
+#
+# x_B = project_B.forward(x_B0)
+# normB = np.average(np.linalg.norm(x_B, axis=-1))
+# avgB = np.average(project_B.forward(x_B0), axis=(0,1,2))
+# avgB_A = np.average(project_A.forward(x_B0), axis=(0,1,2))
+# stdB = np.std(project_B.forward(x_B0), axis=(0,1,2))
+# stdB_A = np.std(project_A.forward(x_B0), axis=(0,1,2))
+#
+# x_A_B = project_B.forward(x_A0)
+# print("x_A->B: {}".format(x_A_B.shape))
+#
+# x_B_A = project_A.forward(x_B0)
+# print("x_B->A: {}".format(x_B_A.shape))
+#
+# xsA_A, ysA_A = build_distribution(project_A.forward(x_A0), equal=True)
+# xsB_B, ysB_B = build_distribution(project_B.forward(x_B0), equal=True)
 
 inp[:TEST_SIZE] = remap_distribution(inp[:TEST_SIZE], xsA0, ysA0)
 inp[TEST_SIZE:] = remap_distribution(inp[TEST_SIZE:], xsB0, ysB0)

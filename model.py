@@ -12,7 +12,7 @@ class Model():
 
         # eps = np.exp(np.linspace(np.log(eps_start), np.log(eps_end), n_layers * 2))
 
-        for i in range(1):
+        for i in range(n_layers):
             # eps1 = eps[2*i]
             # eps2 = eps[2*i+1]
             eps1 = eps[i]
@@ -23,11 +23,15 @@ class Model():
             self.layers.append(Layer(ksize=3, stride=2, orient="both", eps=eps1, distribution_approx_n=approx_n))
             # self.layers.append(Layer(ksize=3, stride=1, orient="both", eps=eps1, distribution_approx_n=approx_n))
 
-    def fit(self, dataset, batch_size=1):
+    def fit(self, dataset, batch_size=1, skip_layers=0):
         x = dataset
 
-        for layer in self.layers:
-            x = layer.fit(x, batch_size)
+        for i, layer in enumerate(self.layers):
+            if i < skip_layers:
+                layer.load(i)
+                x = layer.forward(x, batch_size)
+            else:
+                x = layer.fit(x, batch_size)
             print(x.shape)
 
         return x
