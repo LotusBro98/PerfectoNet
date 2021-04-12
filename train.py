@@ -5,18 +5,17 @@ from distribution import *
 from model import Model
 
 
-DATASET_SIZE = 100
+DATASET_SIZE = 500
 BATCH_SIZE = 4
-TEST_SIZE = 4
+TEST_SIZE = 2
 
-N_LAYERS = 1
-SKIP_LAYERS = 0
-#
+N_LAYERS = 3
+SKIP_LAYERS = 2
 # EPS_START = 2e-2
 # EPS_END = 2e-2
-EPS = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+EPS = [0.1, 0.1, 0.1, 0.1, 0.15, 0.2]
 # EPS = np.exp(np.linspace(np.log(0.05), np.log(1), N_LAYERS))
-# EPS = [0.1] * 6
+# EPS = [0.15] * 6
 
 
 # SIZE = 2**(N_LAYERS + 1) - 1
@@ -66,8 +65,10 @@ model.save()
 
 # print(x)
 
-x_A0 = model.forward(inp_A0)
-x_B0 = model.forward(inp_B0)
+# x_A0 = model.forward(inp_A0)
+# x_B0 = model.forward(inp_B0)
+x_A0 = x[:DATASET_SIZE]
+x_B0 = x[DATASET_SIZE:]
 
 np.save("saved/x_A0", x_A0)
 np.save("saved/x_B0", x_B0)
@@ -78,7 +79,7 @@ np.save("saved/x_B0", x_B0)
 # np.save("saved/ysB0", ysB0)
 
 # x = np.concatenate([x_A0, x_B0], axis=0)
-x = model.backward(x)
+x = model.backward(x[:2*TEST_SIZE])
 
 outp = x
 
@@ -90,12 +91,12 @@ outp = x
 
 f, ax = plt.subplots(2, 2*(TEST_SIZE), figsize=(10*TEST_SIZE, 10))
 
-for i in range(TEST_SIZE):
+for i in range(2*TEST_SIZE):
     ax[0, i].imshow(inp[i])
     ax[1, i].imshow(outp[i])
 
-for i in range(0, TEST_SIZE):
-    ax[0, TEST_SIZE + i].imshow(inp[DATASET_SIZE + i])
-    ax[1, TEST_SIZE + i].imshow(outp[DATASET_SIZE + i])
+# for i in range(0, TEST_SIZE):
+#     ax[0, TEST_SIZE + i].imshow(inp[DATASET_SIZE + i])
+#     ax[1, TEST_SIZE + i].imshow(outp[DATASET_SIZE + i])
 
 plt.show()

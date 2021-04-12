@@ -5,6 +5,7 @@ import numpy as np
 import scipy.special
 import matplotlib.pyplot as plt
 import scipy.stats as st
+from matplotlib.patches import Ellipse
 
 
 # def show_distribution(dataset):
@@ -273,7 +274,7 @@ def gkern(kernlen=21, nsig=3):
     return kern2d/kern2d.sum()
 
 
-def show_common_distributions(dataset, eps=0.25):
+def show_common_distributions(dataset, centers=None, stdf=None, eps=0.25):
     dataset = flatten(dataset)
     if isinstance(dataset, tf.Tensor):
         dataset = dataset.numpy()
@@ -281,49 +282,24 @@ def show_common_distributions(dataset, eps=0.25):
     approx_n_check = 32
     approx_n_show = 32
 
-    # if approx_n_check > approx_n_opt:
-    #     approx_n_check = approx_n_opt
-    # if approx_n_show > approx_n_opt:
-    #     approx_n_show = approx_n_opt
-
-    dependence_matrix = np.zeros((dataset.shape[-1], dataset.shape[-1]))
-
-    N = dataset.shape[-1]  # int(math.ceil(np.sqrt(len(pairs))))
+    N = dataset.shape[-1]
     fig = plt.figure(figsize=(2 * N, 2 * N))
 
     pairs = []
     for i in range(dataset.shape[-1]):
         for j in range(dataset.shape[-1]):
-            # print(i, j)
-            # if i == j:
-            #     dependence_matrix[i, j] = 1
-            #     # continue
-            # density = common_distribution(dataset, c1=i, c2=j, approx_n=approx_n_check)
-            # density0 = np.sum(density, axis=1)
-            # density1 = np.sum(density, axis=0)
-            # density0 /= np.sum(density0)
-            # density1 /= np.sum(density1)
-            # density_equal = np.outer(density0, density1)
-            # density_diff = np.sum(np.abs(density_equal - density))
-            # print(density_diff)
-            # if density_diff > eps:
-            #     dependence_matrix[i, j] = 1
-            # else:
-            #     dependence_matrix[i, j] = 0
-            #     continue
-
             density = common_distribution(dataset, approx_n=approx_n_show, c1=i, c2=j)
             density = np.log(density + 1e4)
-            # density = density_equal
-            # print(density)
-            # density = density / gkern(len(density), 2)
-            # density = density[1:-1, 1:-1]
+
             meand = np.average(density)
             stdd = np.std(density)
             mind = np.min(density)
 
-            mean = np.average(dataset, axis=0)
-            std = np.std(dataset, axis=0)
+            # mean = np.average(dataset, axis=0)
+            mean = (np.max(dataset, axis=0) + np.min(dataset, axis=0)) / 2
+            # std = np.std(dataset, axis=0) * 3
+            std = (np.max(dataset, axis=0) - np.min(dataset, axis=0)) / 2
+
             extent = [
                 mean[j] - std[j], mean[j] + std[j],
                 mean[i] - std[i], mean[i] + std[i],
@@ -335,6 +311,13 @@ def show_common_distributions(dataset, eps=0.25):
                        extent=extent,
                        aspect=(extent[1] - extent[0]) / (extent[3] - extent[2])
                        )
+
+            if centers is not None:
+                centers_ij = centers[:,[j,i]]
+                stdf_ij = stdf[:,[j,i]]
+                for (x, y), (dx, dy) in zip(centers_ij, stdf_ij):
+                    ellipse = Ellipse((x, y), dx, dy, color='orange', alpha=0.3)
+                    ax.add_artist(ellipse)
             # ax.axis('off')
     plt.show()
 

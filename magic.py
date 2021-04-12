@@ -110,8 +110,8 @@ x_B0 = np.load("saved/x_B0.npy")
 # xsA_A, ysA_A = build_distribution(project_A.forward(x_A0), equal=True)
 # xsB_B, ysB_B = build_distribution(project_B.forward(x_B0), equal=True)
 
-inp[:TEST_SIZE] = remap_distribution(inp[:TEST_SIZE], xsA0, ysA0)
-inp[TEST_SIZE:] = remap_distribution(inp[TEST_SIZE:], xsB0, ysB0)
+# inp[:TEST_SIZE] = remap_distribution(inp[:TEST_SIZE], xsA0, ysA0)
+# inp[TEST_SIZE:] = remap_distribution(inp[TEST_SIZE:], xsB0, ysB0)
 
 x = model.forward(inp)
 
@@ -141,11 +141,11 @@ x = model.backward(x, BATCH_SIZE)
 
 outp = x
 
-inp[:TEST_SIZE] = remap_distribution(inp[:TEST_SIZE], ysA0, xsA0)
-inp[TEST_SIZE:] = remap_distribution(inp[TEST_SIZE:], ysB0, xsB0)
-
-outp[:TEST_SIZE] = remap_distribution(outp[:TEST_SIZE], ysB0, xsB0)
-outp[TEST_SIZE:] = remap_distribution(outp[TEST_SIZE:], ysA0, xsA0)
+# inp[:TEST_SIZE] = remap_distribution(inp[:TEST_SIZE], ysA0, xsA0)
+# inp[TEST_SIZE:] = remap_distribution(inp[TEST_SIZE:], ysB0, xsB0)
+#
+# outp[:TEST_SIZE] = remap_distribution(outp[:TEST_SIZE], ysB0, xsB0)
+# outp[TEST_SIZE:] = remap_distribution(outp[TEST_SIZE:], ysA0, xsA0)
 
 f, ax = plt.subplots(2, 2*(TEST_SIZE), figsize=(10*TEST_SIZE, 10))
 

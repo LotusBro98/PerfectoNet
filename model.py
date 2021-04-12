@@ -18,10 +18,7 @@ class Model():
             eps1 = eps[i]
             eps2 = eps1
 
-            # self.layers.append(Layer(ksize=3, stride=2, orient="ver", eps=eps1, distribution_approx_n=approx_n))
-            # self.layers.append(Layer(ksize=3, stride=2, orient="hor", eps=eps2, distribution_approx_n=approx_n))
             self.layers.append(Layer(ksize=3, stride=2, orient="both", eps=eps1, distribution_approx_n=approx_n))
-            # self.layers.append(Layer(ksize=3, stride=1, orient="both", eps=eps1, distribution_approx_n=approx_n))
 
     def fit(self, dataset, batch_size=1, skip_layers=0):
         x = dataset
@@ -32,7 +29,9 @@ class Model():
                 x = layer.forward(x, batch_size)
             else:
                 x = layer.fit(x, batch_size)
-                show_common_distributions(np.concatenate([x[:, :, :, :6]], axis=-1))
+                # centers = layer.m2[:, :6]
+                # stdf = layer.stdf[:, :6]
+                # show_common_distributions(x[:, :, :, :6], centers, stdf)
             print(x.shape)
 
         return x
@@ -45,8 +44,10 @@ class Model():
         return x
 
     def backward(self, x, batch_size=1):
+        print(x.shape)
         for layer in self.layers[::-1]:
             x = layer.backward(x, batch_size)
+            print(x.shape)
 
         return x
 
