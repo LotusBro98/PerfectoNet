@@ -86,12 +86,13 @@ class Layer():
         if n_features == 0:
             return [np.int32(list(range(len(x))))]
 
-        eps = self.eps
+        sigma = scipy.special.erfinv(1 - self.clip_loss) * np.sqrt(2)
+        eps = self.eps * sigma * 3
 
         peaks = []
         ch = x[:, 0]
-        m, M = np.min(ch), np.max(ch) + 2 * eps
-        checks = np.arange(m, M, self.eps)
+        m, M = np.min(ch) - 2 * eps, np.max(ch) + 2 * eps
+        checks = np.arange(m, M, eps)
         for i in range(len(checks) - 1):
             where = np.argwhere((ch >= checks[i]) & (ch < checks[i+1]))[:,0]
             subset = x[where]
@@ -105,7 +106,7 @@ class Layer():
     def get_peaks(self, x, n_features, min_len):
         peaks = self._get_peaks(x, n_features, min_len)
         peaks = sorted(peaks, key=lambda x: len(x), reverse=True)
-        peaks = [np.take(x, peak, axis=0) for peak in peaks]
+        peaks = [np.take(x, peak, axis=0).copy() for peak in peaks]
         return peaks
 
 
@@ -114,7 +115,7 @@ class Layer():
         centers = self.m2[:,:n_features]
         return centers
 
-    def get_2_order_kernel(self, x, odd=0.001, batch_size=1000):
+    def get_2_order_kernel(self, x, odd=0.0001, batch_size=1000):
         x = flatten(x)
         # self.channel_std = np.std(x, axis=0)
 
@@ -122,10 +123,11 @@ class Layer():
 
         # xp, xnp = self.get_peak(x, x.shape[-1], 0.9)
         std = np.std(x, axis=0)
+        # std = get_std_by_peak(x, 0.9)
         n_features = np.count_nonzero(std >= self.eps)
         # if (min_len < n_features):
         # n_features = min(n_features, min_len)
-        # min_len = max(n_features, min_len)
+        min_len = max(n_features, min_len)
         take_channels = np.argsort(std)[::-1]
         print("{} main channels, {} secondary".format(n_features, x.shape[-1] - n_features))
 
@@ -135,7 +137,7 @@ class Layer():
         self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
         self.channel_std = np.take(std, take_channels, axis=-1)
 
-        groups = self.get_peaks(x, n_features, min_len=n_features)
+        groups = self.get_peaks(x, n_features, min_len=min_len)
 
         # rest = x
         # groups = []
@@ -161,6 +163,7 @@ class Layer():
             Ks.append(K)
             ms.append(mean)
             stds.append(np.std(inside[:, :n_features], axis=0))
+            # stds.append(np.ones_like(inside[0, :n_features]) * self.eps)
             # groups.append(inside)
 
             # print(len(inside), len(rest), len(x), min_len)
@@ -231,11 +234,13 @@ class Layer():
         for i in range(0, len(x), batch_size):
             x_batch = x[i:i+batch_size]
             xf = x_batch
-            dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers) / self.stdf), axis=-1, keepdims=True)
+            # dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers) / self.stdf), axis=-1, keepdims=True)
+            dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers) / self.stdf), axis=-1)
             # dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers)), axis=-1)
-            closest = tf.exp(-0.5*tf.square(dist))
-            closest = closest / tf.reduce_sum(closest, axis=-2, keepdims=True)
-            # closest = tf.argmin(dist, axis=-1)
+            # closest = tf.exp(-0.5*tf.square(dist))
+            # closest = tf.exp(-dist)
+            # closest = closest / tf.reduce_sum(closest, axis=-2, keepdims=True)
+            closest = tf.argmin(dist, axis=-1)
 
             xf = tf.expand_dims(xf, axis=-2)
             xf = xf - centers
@@ -246,8 +251,8 @@ class Layer():
             xb = tf.squeeze(xb, axis=-1)
             xb = tf.concat([xf, xb], axis=-1)
             xb = xb + self.m2
-            # xb = tf.gather(xb, closest, axis=-2, batch_dims=3)
-            xb = tf.reduce_sum(xb * closest, axis=-2)
+            xb = tf.gather(xb, closest, axis=-2, batch_dims=3)
+            # xb = tf.reduce_sum(xb * closest, axis=-2)
 
             xb_all.append(xb)
         xb = tf.concat(xb_all, axis=0)
@@ -281,6 +286,7 @@ class Layer():
         sigma = scipy.special.erfinv(1 - self.clip_loss) * np.sqrt(2)
         # std = self.channel_std
         std = self.stdf
+        # std = self.eps * 5
         # std = np.sqrt(np.sum(self.channel_std))
 
         x = x / (std * sigma)
@@ -290,7 +296,7 @@ class Layer():
             # x = tf.atanh(x / sigma) * sigma
             # mul = 10
             # x = tf.tanh(x)
-            x = tf.clip_by_value(x, -1, 1)
+            # x = tf.clip_by_value(x, -1, 1)
             pass
         else:
             if train:
@@ -298,8 +304,8 @@ class Layer():
                 pass
             else:
                 # x = tf.tanh(x)
-                # pass
-                x = tf.clip_by_value(x, -1, 1)
+                pass
+                # x = tf.clip_by_value(x, -1, 1)
 
         # x[np.abs(x) > sigma] = 0
         # x = tf.clip_by_value(x, -sigma, sigma)

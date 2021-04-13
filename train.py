@@ -5,15 +5,15 @@ from distribution import *
 from model import Model
 
 
-DATASET_SIZE = 20
+DATASET_SIZE = 500
 BATCH_SIZE = 4
 TEST_SIZE = 2
 
-N_LAYERS = 2
-SKIP_LAYERS = 1
+N_LAYERS = 4
+SKIP_LAYERS = 3
 # EPS_START = 2e-2
 # EPS_END = 2e-2
-EPS = [0.1, 0.1, 0.1, 0.1, 0.2, 0.5]
+EPS = [0.05, 0.07, 0.1, 0.1, 0.2, 0.5]
 # EPS = np.exp(np.linspace(np.log(0.05), np.log(1), N_LAYERS))
 # EPS = [0.15] * 6
 
