@@ -29,9 +29,9 @@ class Model():
                 x = layer.forward(x, batch_size)
             else:
                 x = layer.fit(x, batch_size)
-                # centers = layer.m2[:, :6]
-                # stdf = layer.stdf[:, :6]
-                # show_common_distributions(x[:, :, :, :6], centers, stdf)
+                centers = layer.m2[:, :6]
+                stdf = layer.stdf[:, :6]
+                show_common_distributions(x[:, :, :, :6], centers, stdf)
             print(x.shape)
 
         return x

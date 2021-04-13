@@ -82,46 +82,39 @@ class Layer():
 
         return x
 
-    def get_peak(self, x, n_features, min_len=1, eps=None):
-        if eps is None:
-            eps = self.eps * 3
-        # n_splits = 10
+    def _get_peaks(self, x, n_features, min_len):
+        if n_features == 0:
+            return [np.int32(list(range(len(x))))]
 
-        x = flatten(x)
-        rest = x
-        outside = []
-        for i in range(n_features):
-            ch = rest[:, i]
-            m, M = np.min(ch), np.max(ch) + 1e-4
-            n_splits = int(math.ceil((M - m) / eps)) + 1
-            # n_splits = min(int(math.ceil((M - m) / eps)) + 1, 6)
-            checks = np.linspace(m, M, n_splits)
-            density = np.stack([np.sum((ch >= checks[i]) & (ch < checks[i + 1])) for i in range(len(checks) - 1)])
-            peak_i = np.argmax(density)
-            outside.append(rest[(ch < checks[peak_i]) | (ch >= checks[peak_i + 1])])
-            rest = rest[(ch >= checks[peak_i]) & (ch < checks[peak_i + 1])]
+        eps = self.eps
 
-        # if len(rest) < min_len:
-        peak = np.average(rest, axis=0)
-        dist = np.linalg.norm((x - peak), axis=-1)
-        idxs = np.argsort(dist)
-        dist = np.sort(dist)
-        take_n = np.count_nonzero(dist <= 2 * eps)
-        take_n = max(min_len, take_n)
-        inside = np.take(x, idxs[:take_n], axis=0)
-        outside = np.take(x, idxs[take_n:], axis=0)
-        # else:
-        #     inside = rest
-        #     outside = np.concatenate(outside, axis=0)
+        peaks = []
+        ch = x[:, 0]
+        m, M = np.min(ch), np.max(ch) + 2 * eps
+        checks = np.arange(m, M, self.eps)
+        for i in range(len(checks) - 1):
+            where = np.argwhere((ch >= checks[i]) & (ch < checks[i+1]))[:,0]
+            subset = x[where]
+            if len(subset) < min_len:
+                continue
+            subset_peaks = self._get_peaks(subset[:,1:], n_features-1, min_len)
+            subset_peaks = [np.take(where, peak) for peak in subset_peaks]
+            peaks += subset_peaks
+        return peaks
 
-        return inside, outside
+    def get_peaks(self, x, n_features, min_len):
+        peaks = self._get_peaks(x, n_features, min_len)
+        peaks = sorted(peaks, key=lambda x: len(x), reverse=True)
+        peaks = [np.take(x, peak, axis=0) for peak in peaks]
+        return peaks
+
 
     def get_centers(self):
         n_features = self.K2.shape[2]
         centers = self.m2[:,:n_features]
         return centers
 
-    def get_2_order_kernel(self, x, odd=0.005, batch_size=1000):
+    def get_2_order_kernel(self, x, odd=0.001, batch_size=1000):
         x = flatten(x)
         # self.channel_std = np.std(x, axis=0)
 
@@ -131,8 +124,8 @@ class Layer():
         std = np.std(x, axis=0)
         n_features = np.count_nonzero(std >= self.eps)
         # if (min_len < n_features):
-        #     n_features = int(np.sqrt(min(n_features, min_len) * n_features))
-        #     min_len = n_features
+        # n_features = min(n_features, min_len)
+        # min_len = max(n_features, min_len)
         take_channels = np.argsort(std)[::-1]
         print("{} main channels, {} secondary".format(n_features, x.shape[-1] - n_features))
 
@@ -142,14 +135,18 @@ class Layer():
         self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
         self.channel_std = np.take(std, take_channels, axis=-1)
 
-        rest = x
-        groups = []
+        groups = self.get_peaks(x, n_features, min_len=n_features)
+
+        # rest = x
+        # groups = []
         Ks = []
         ms = []
         stds = []
         # show_common_distributions(rest[:,:4])
-        while len(rest) > min_len:
-            inside, outside = self.get_peak(rest, n_features=n_features, min_len=min_len)
+        # while len(rest) > min_len:
+        for group in groups:
+            inside = group
+            # inside, outside = self.get_peak(rest, n_features=n_features, min_len=2*n_features)
 
             mean = np.average(inside, axis=0)
             xi = inside - mean
@@ -159,14 +156,14 @@ class Layer():
 
             K = np.linalg.lstsq(x_main, x_sec, rcond=None)[0].T
 
-            rest = outside
+            # rest = outside
 
             Ks.append(K)
             ms.append(mean)
             stds.append(np.std(inside[:, :n_features], axis=0))
-            groups.append(inside)
+            # groups.append(inside)
 
-            print(len(inside), len(rest), len(x), min_len)
+            # print(len(inside), len(rest), len(x), min_len)
 
             # show_common_distributions(rest[:,:4])
 
@@ -174,7 +171,7 @@ class Layer():
         self.m2 = np.stack(ms, axis=0)
         self.stdf = np.stack(stds, axis=0)
 
-        sigma_near = scipy.special.erfinv(0.7) * np.sqrt(2)
+        sigma_near = scipy.special.erfinv(0.9) * np.sqrt(2)
         centers = self.get_centers()
         close_groups = []
         for i in range(centers.shape[0]-1):
@@ -187,7 +184,8 @@ class Layer():
                 continue
             dist = np.linalg.norm((centers - centers[i]) / (self.stdf + self.stdf[i]), axis=-1)[i:]
             near = (i + np.argwhere(dist <= sigma_near)[:, 0]).tolist()
-            close_groups.append(near)
+            if len(near) > 0:
+                close_groups.append(near)
         print(close_groups)
 
         take_groups = []
@@ -233,9 +231,11 @@ class Layer():
         for i in range(0, len(x), batch_size):
             x_batch = x[i:i+batch_size]
             xf = x_batch
-            dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers) / self.stdf), axis=-1)
+            dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers) / self.stdf), axis=-1, keepdims=True)
             # dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers)), axis=-1)
-            closest = tf.argmin(dist, axis=-1)
+            closest = tf.exp(-0.5*tf.square(dist))
+            closest = closest / tf.reduce_sum(closest, axis=-2, keepdims=True)
+            # closest = tf.argmin(dist, axis=-1)
 
             xf = tf.expand_dims(xf, axis=-2)
             xf = xf - centers
@@ -246,8 +246,8 @@ class Layer():
             xb = tf.squeeze(xb, axis=-1)
             xb = tf.concat([xf, xb], axis=-1)
             xb = xb + self.m2
-            xb = tf.gather(xb, closest, axis=-2, batch_dims=3)
-            # xb = tf.reduce_sum(xb * closest, axis=-2)
+            # xb = tf.gather(xb, closest, axis=-2, batch_dims=3)
+            xb = tf.reduce_sum(xb * closest, axis=-2)
 
             xb_all.append(xb)
         xb = tf.concat(xb_all, axis=0)
