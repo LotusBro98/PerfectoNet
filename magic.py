@@ -13,7 +13,7 @@ from model import Model
 BATCH_SIZE = 4
 TEST_SIZE = 4
 
-N_LAYERS = 6
+N_LAYERS = 4
 
 EPS = [0.15] * 6
 
@@ -21,7 +21,7 @@ EPS_L_A = 0.3
 EPS_L_B = 0.3
 
 
-SIZE = 2**(N_LAYERS + 1) - 1
+SIZE = 127
 
 DISTRIBUTION_APPROX_N = 64
 

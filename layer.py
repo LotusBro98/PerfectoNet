@@ -100,12 +100,15 @@ class Layer():
             peaks += subset_peaks
         return peaks
 
-    def get_peaks(self, x, n_features, min_len, min_dens=0.01):
+    def get_peaks(self, x, n_features, min_len, min_dens=1):
         # eps = 0.2
 
-        n_features = x.shape[-1]
+        # n_features = x.shape[-1]
 
-        eps = np.power(min_dens * len(x) / min_len, 1 / n_features)
+        # min_dens = 1 / np.max(np.max(x, axis=0) - np.min(x, axis=0))
+        min_dens = 1 / np.sqrt(np.sum(np.square(np.std(x, axis=0))))
+
+        eps = np.power(min_len / (len(x)), 1 / n_features) / min_dens
 
         # min_len = int(min_dens * len(x) * np.power(eps, n_features))
         print(eps, min_len, len(x))
@@ -113,7 +116,8 @@ class Layer():
         peaks = self._get_peaks(x, n_features, min_len, eps)
         peaks = sorted(peaks, key=lambda x: len(x), reverse=True)
         peaks = [np.take(x, peak, axis=0).copy() for peak in peaks]
-        # peaks = peaks[:1000]
+
+        peaks = peaks[:1000]
         # lens = np.cumsum([len(peak) for peak in peaks])
         # n_peaks = np.sum(lens < frac * len(x))
         # peaks = peaks[:n_peaks]
@@ -165,6 +169,8 @@ class Layer():
             x_sec = xi[:, n_features:]
 
             K = np.linalg.lstsq(x_main, x_sec, rcond=None)[0].T
+            # U, S, V = np.linalg.svd(K, full_matrices=False)
+            # K = np.matmul(U, V)
 
             # rest = outside
 
@@ -182,10 +188,10 @@ class Layer():
         self.m2 = np.stack(ms, axis=0)
         self.stdf = np.stack(stds, axis=0)
 
-        sigma_near = scipy.special.erfinv(0.2) * np.sqrt(2)
+        sigma_near = scipy.special.erfinv(0.7) * np.sqrt(2)
         centers = self.get_centers()
         close_groups = []
-        for i in range(centers.shape[0]-1):
+        for i in range(centers.shape[0]):
             found = False
             for gr in close_groups:
                 if i in gr:
@@ -245,7 +251,7 @@ class Layer():
             # dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers) / self.stdf), axis=-1, keepdims=True)
             dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers) / self.stdf), axis=-1)
             # dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers)), axis=-1)
-            # closest = tf.exp(-0.5*tf.square(dist))
+            # closest = tf.exp(-0.5*tf.square(dist))# + 0.1 / dist.shape[-2]
             # closest = tf.exp(-dist)
             # closest = closest / tf.reduce_sum(closest, axis=-2, keepdims=True)
             closest = tf.argmin(dist, axis=-1)
@@ -313,8 +319,10 @@ class Layer():
             # x = tf.atanh(x / sigma) * sigma
             # mul = 10
             # if back:
-            #     x = tf.tanh(x)
-            # x = tf.clip_by_value(x, -1, 1)
+            #     # x = tf.tanh(x)
+            #     x = tf.clip_by_value(x, -1, 1)
+            # else:
+            #     x = tf.clip_by_value(x, -1, 1)
             pass
         else:
             # x = tf.tanh(x)
@@ -481,7 +489,7 @@ class Layer():
         if self.equalize:
             K = np.matmul(np.diag(1/np.sqrt(S / np.average(S)) / std), K)
         else:
-            K = K / np.sqrt((np.count_nonzero(mask) / np.sum(1 / mask)))
+            K = K / ((np.count_nonzero(mask) / np.sum(1 / mask)))
         bias_forward = -tf.squeeze(tf.matmul(K, tf.expand_dims(mean_p, axis=-1)))
         K = tf.reshape(K, (V.shape[0], ksize[0], ksize[1], Cin))
         K = tf.transpose(K, (1, 2, 3, 0))
@@ -490,7 +498,7 @@ class Layer():
         if self.equalize:
             K_T = np.matmul(K_T, np.diag(np.sqrt(S / np.average(S)) * std))
         else:
-            K_T = K_T * np.sqrt((np.count_nonzero(mask) / np.sum(1 / mask)))
+            K_T = K_T * ((np.count_nonzero(mask) / np.sum(1 / mask)))
         bias_backward = mean_p
         bias_backward = tf.reshape(bias_backward, (ksize[0], ksize[1], Cin, 1))
         # bias_backward /= np.expand_dims(mask, axis=(-1, -2))
