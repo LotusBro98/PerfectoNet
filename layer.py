@@ -82,94 +82,6 @@ class Layer():
 
         return x
 
-    def _get_peaks(self, x, n_features, min_len, eps):
-        if n_features == 0:
-            return [np.int32(list(range(len(x))))]
-
-        peaks = []
-        ch = x[:, 0]
-        m, M = np.min(ch), np.max(ch) + 2 * eps
-        checks = np.arange(m, M, eps)
-        for i in range(len(checks) - 1):
-            where = np.argwhere((ch >= checks[i]) & (ch < checks[i+1]))[:,0]
-            subset = x[where]
-            if len(subset) <= min_len:
-                continue
-            subset_peaks = self._get_peaks(subset[:,1:], n_features-1, min_len, eps)
-            subset_peaks = [np.take(where, peak) for peak in subset_peaks]
-            peaks += subset_peaks
-        return peaks
-
-    def get_peaks(self, x, n_features, min_len, max_peaks=400):
-        # eps = 0.2
-
-        n_features = x.shape[-1]
-
-        # min_len = int(math.ceil(len(x) / max_peaks))
-
-        # min_dens = 1 / np.max(np.max(x, axis=0) - np.min(x, axis=0))
-        # size = np.sqrt(np.sum(np.square(np.std(x, axis=0))))
-
-        eps = 0.5
-        # min_len_by_eps = int(len(x) * np.power(eps * min_dens, n_features))
-        # if min_len < min_len_by_eps:
-        #   min_len = min_len_by_eps
-        # else:
-        #   eps = np.power(min_len / (len(x)), 1 / n_features) / min_dens
-
-        peaks = self._get_peaks(x, n_features, min_len, eps)
-
-        # peaks = []
-        # rest = x
-        # while len(rest) > min_len:
-        #     print(eps, min_len, len(rest), len(peaks))
-        #     peaks_1 = self._get_peaks(np.asarray(rest), n_features, min_len, eps)
-        #     if len(peaks_1) > 0:
-        #         all_peaks_1 = np.sort(np.concatenate(peaks_1, axis=0))
-        #         rest_idx = np.arange(0, len(rest), dtype=np.int32)
-        #         rest_idx = list(set(rest_idx) - set(all_peaks_1))
-        #         rest = np.take(rest, rest_idx, axis=0)
-        #         peaks += peaks_1
-        #     eps *= 1.5
-
-        peaks = sorted(peaks, key=lambda x: len(x), reverse=True)
-        peaks = [np.take(x, peak, axis=0).copy() for peak in peaks]
-
-        # peaks = peaks[:max_peaks]
-        # lens = np.cumsum([len(peak) for peak in peaks])
-        # n_peaks = np.sum(lens < frac * len(x))
-        # peaks = peaks[:n_peaks]
-
-        return peaks
-
-    def get_peak(self, x, eps=None):
-        if eps is None:
-            eps = 0.1
-        # n_splits = 10
-
-        x = flatten(x)
-        rest = x
-        outside = []
-        for i in range(x.shape[-1]):
-            ch = rest[:, i]
-            m, M = np.min(ch), np.max(ch) + 2 * eps
-            checks = np.arange(m, M, eps)
-            density = np.stack([np.sum((ch >= checks[i]) & (ch < checks[i + 1])) for i in range(len(checks) - 1)])
-            peak_i = np.argmax(density)
-            outside.append(rest[(ch < checks[peak_i]) | (ch >= checks[peak_i + 1])])
-            rest = rest[(ch >= checks[peak_i]) & (ch < checks[peak_i + 1])]
-
-        # if len(rest) < min_len:
-        peak = np.average(rest, axis=0)
-
-        return peak
-
-
-    def get_centers(self):
-        n_features = self.K2.shape[2]
-        centers = self.m2[:,:n_features]
-        return centers
-
     def get_nonzero_cov(self, dataset):
         cov = np.zeros((dataset.shape[-1], dataset.shape[-1]), dtype=np.float32)
         nz = np.abs(dataset) > self.eps
@@ -189,7 +101,7 @@ class Layer():
 
         return cov
 
-    def get_2_order_kernel(self, x, odd=0.0001, batch_size=1000):
+    def get_2_order_kernel(self, x):
         x = flatten(x)
         # self.channel_std = np.std(x, axis=0)
 
@@ -250,158 +162,8 @@ class Layer():
         plt.imshow(np.abs(K0))
         plt.show()
 
-        # self.kernel_forward = np.take(self.kernel_forward, take_channels, axis=-1)
-        # self.kernel_backward = np.take(self.kernel_backward, take_channels, axis=-1)
-        # self.bias_forward = np.take(self.bias_forward, take_channels, axis=-1)
-        # self.channel_std = np.take(std, take_channels, axis=-1)
-
-        # rest = x
-        # groups = []
-        # Ks = []
-        # ms = []
-        # stds = []
-        # # show_common_distributions(rest[:,:4])
-        # while len(rest) > min_len:
-        # # for group in groups:
-        #
-        #     # show_common_distributions(rest[:,:6])
-        #
-        #     # inside = group
-        #     # inside, outside = self.get_peak(rest, n_features=n_features, min_len=2*n_features)
-        #     inside = rest
-        #     rest = rest[:0]
-        #     for i in range(100):
-        #         # mean = self.get_peak(inside)
-        #         mean = np.average(inside)
-        #         xi = inside - mean
-        #
-        #         cov = np.average(np.matmul(np.expand_dims(xi, axis=-1), np.expand_dims(xi, axis=-2)), axis=0)
-        #         U, S, V = np.linalg.svd(cov)
-        #         K = V
-        #
-        #         # plt.imshow(np.abs(V))
-        #         # plt.show()
-        #
-        #         xr = inside - mean
-        #         xr = np.matmul(xr, K.T)
-        #
-        #         xr_sec = xr[:,n_features:]
-        #         peak_r = self.get_peak(xr_sec)
-        #         xr_sec = xr_sec - peak_r
-        #
-        #         # show_common_distributions(xr_sec[:,:6])
-        #
-        #         dist = np.linalg.norm(xr_sec, axis=-1)
-        #         cut_dist = np.sort(dist)[int(0.5 * len(dist))]
-        #         # plt.plot(np.sort(dist))
-        #         # plt.show()
-        #
-        #         if cut_dist <= self.eps * sigma:
-        #             cut_dist = self.eps * sigma
-        #
-        #         rest = np.concatenate([rest, inside[dist >= cut_dist]], axis=0)
-        #         inside = inside[dist < cut_dist]
-        #         # inside = rest[dist < cut_dist]
-        #         # outside = rest[dist >= cut_dist]
-        #
-        #
-        #
-        #         if cut_dist <= self.eps * sigma:
-        #             break
-        #
-        #
-        #
-        #     # rest = outside
-        #
-        #     # U, S, V = np.linalg.svd(K, full_matrices=False)
-        #     # K = np.matmul(U, V)
-        #
-        #     # rest = outside
-        #
-        #     print(len(inside), len(rest), len(x), min_len)
-        #
-        #     # if len(inside) < min_len:
-        #     #     continue
-        #
-        #     mean = self.get_peak(inside)
-        #     xi = inside - mean
-        #     x_main = xi[:, :n_features]
-        #     # stdf = get_std_by_peak(x_main)
-        #     stdf = np.std(x_main, axis=0)
-        #     x_sec = xi[:, n_features:]
-        #     K = np.linalg.lstsq(x_main, x_sec, rcond=None)[0].T
-        #
-        #     Ks.append(K)
-        #     ms.append(mean)
-        #     stds.append(stdf)
-        #     # stds.append(np.ones_like(inside[0, :n_features]) * 0.1)
-        #     groups.append(inside)
-        #
-        #     # show_common_distributions(rest[:,:4])
-        #
-        # self.K2 = np.stack(Ks, axis=0)
-        # self.m2 = np.stack(ms, axis=0)
-        # self.stdf = np.stack(stds, axis=0)
-        #
-        # # K_norm = np.float32([np.linalg.norm(K) for K in Ks])
-        # # # plt.plot(np.sort(K_norm)[::-1])
-        # # take_groups = np.argwhere((K_norm > 0.5) & (K_norm < 5))[:,0]
-        # # take_groups = take_groups[np.argsort(K_norm[take_groups])][::-1][:500]
-        # # plt.plot(K_norm[take_groups])
-        # # plt.show()
-        #
-        # # sigma_near = scipy.special.erfinv(0.4) * np.sqrt(2)
-        # # centers = self.get_centers()
-        # # close_groups = []
-        # # for i in range(centers.shape[0]):
-        # #     found = False
-        # #     for gr in close_groups:
-        # #         if i in gr:
-        # #             found = True
-        # #             break
-        # #     if found:
-        # #         continue
-        # #     dist = np.linalg.norm((centers - centers[i]) / (self.stdf + self.stdf[i]), axis=-1)[i:]
-        # #     near = (i + np.argwhere(dist <= sigma_near)[:, 0]).tolist()
-        # #     if len(near) > 0:
-        # #         close_groups.append(near)
-        # # print(close_groups)
-        # #
-        # # take_groups = []
-        # # for i, gr in enumerate(close_groups):
-        # #     max_gr_i = gr[np.argmax([len(groups[g]) for g in gr])]
-        # #     take_groups.append(max_gr_i)
-        # #
-        # # self.K2 = np.take(self.K2, take_groups, axis=0)
-        # # self.m2 = np.take(self.m2, take_groups, axis=0)
-        # # self.stdf = np.take(self.stdf, take_groups, axis=0)
-        #
-        # print(self.K2.shape)
-
-
-
     def _forward_2_order(self, x, do_matmul=True, train=False, batch_size=8):
-        # n_features = self.n_features
-        # centers = self.m2[:, :n_features]
-
-        # xf_a = x[:,:,:,:n_features]
         xf = tf.squeeze(tf.matmul(self.K2, tf.expand_dims(x, axis=-1)), axis=-1)
-
-        # xf_all = []
-        # for i in range(0, len(x), batch_size):
-        #     xf = xf_a[i:i + batch_size]
-        #     xf = tf.expand_dims(xf, axis=-2)
-        #     xf = xf - centers
-        #
-        #     dist = tf.linalg.norm(xf / self.stdf, axis=-1)
-        #     closest = tf.argmin(dist, axis=-1)
-        #     xf = self.clip(xf)
-        #
-        #     xf = xf + centers
-        #     xf = tf.gather(xf, closest, axis=-2, batch_dims=3)
-        #     xf_all.append(xf)
-        # xf = tf.concat(xf_all, axis=0)
-        # xf = xf_a
         return xf
 
     def _backward_2_order(self, x, batch_size=1):
@@ -411,55 +173,6 @@ class Layer():
         nz = tf.squeeze(tf.matmul(self.K0, tf.expand_dims(nz2, axis=-1)), axis=-1)
         nz = tf.cast(nz > 0.5 * np.square(self.eps), tf.float32)
         xb = xb * nz
-
-        # n_features = x.shape[-1]
-        # centers = self.m2[:,:n_features]
-        #
-        # sigma = scipy.special.erfinv(0.9) * np.sqrt(2)
-        #
-        # xb_all = []
-        # for i in range(0, len(x), batch_size):
-        #     x_batch = x[i:i+batch_size]
-        #     xf = x_batch
-        #     # dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers) / self.stdf), axis=-1, keepdims=True)
-        #     dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers) / self.stdf), axis=-1)
-        #     # dist = tf.linalg.norm(((tf.expand_dims(xf, axis=-2) - centers)), axis=-1)
-        #     # closest = tf.exp(-0.5*tf.square(dist))# + 0.1 / dist.shape[-2]
-        #     # closest = tf.exp(-dist)
-        #     # closest = closest / tf.reduce_sum(closest, axis=-2, keepdims=True)
-        #     hit = tf.cast(tf.reduce_any(dist < sigma, axis=-1), tf.float32)
-        #     closest = tf.argmin(dist, axis=-1)
-        #
-        #     xfnh = x_batch[hit == 0,:]
-        #     # show_common_distributions(xfnh)
-        #
-        #     # plt.imshow(hit[0])
-        #     # plt.show()
-        #
-        #     xf = tf.expand_dims(xf, axis=-2)
-        #     xf = xf - centers
-        #     xf = self.clip(xf)
-        #     xf = tf.expand_dims(xf, axis=-1)
-        #     xb = tf.matmul(self.K2, xf)
-        #     xf = tf.squeeze(xf, axis=-1)
-        #     xb = tf.squeeze(xb, axis=-1)
-        #
-        #     xb = self.clip(xb, reverse=True, back=True)
-        #
-        #     xf = xf + centers
-        #     xb = xb + self.m2[:,n_features:]
-        #
-        #     xb = xb * tf.expand_dims(tf.expand_dims(hit, axis=-1), axis=-1)
-        #
-        #     xb = tf.concat([xf, xb], axis=-1)
-        #
-        #     xb = tf.gather(xb, closest, axis=-2, batch_dims=3)
-        #     # xb = tf.reduce_sum(xb * closest, axis=-2)
-        #
-        #
-        #
-        #     xb_all.append(xb)
-        # xb = tf.concat(xb_all, axis=0)
         return xb
 
     def forward(self, x, batch_size=1, do_2=True):
@@ -497,32 +210,7 @@ class Layer():
         # std = self.eps * 5
 
         x = x / std
-        # x = x.numpy()
-
-        if reverse:
-            # x = tf.tanh(x)
-            # x = tf.atanh(x / sigma) * sigma
-            # mul = 10
-            # if back:
-            #     # x = tf.tanh(x)
-            #     x = tf.clip_by_value(x, -1, 1)
-            # else:
-            #     x = tf.clip_by_value(x, -1, 1)
-            pass
-        else:
-            # x = tf.tanh(x)
-            if train:
-                # x = tf.clip_by_value(x, -1, 1)
-                pass
-            else:
-                # x = tf.tanh(x)
-                pass
-                # x = tf.clip_by_value(x, -1, 1)
-
-        # x[np.abs(x) > sigma] = 0
-        # x = tf.clip_by_value(x, -sigma, sigma)
-        # x[:,:,:,-1] = tf.clip_by_value(x[:,:,:,-1], -sigma, sigma)
-        # x[:,:,:,-1] = np.clip(x[:,:,:,-1], -sigma, sigma)
+        # x = tf.clip_by_value(x, -1, 1)
         x = x * std
         return x
 
