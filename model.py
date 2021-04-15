@@ -31,7 +31,7 @@ class Model():
                 x = layer.fit(x, batch_size)
                 # centers = layer.m2[:, :6]
                 # stdf = layer.stdf[:, :6]
-                # show_common_distributions(x[:, :, :, :6], centers, stdf)
+                # show_common_distributions(x[:, :, :, :9])
             print(x.shape)
 
         return x

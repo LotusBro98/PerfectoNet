@@ -115,8 +115,9 @@ def flatten(x):
 def get_std_by_peak(dataset, prob=0.68):
     sigma = scipy.special.erfinv(prob) * np.sqrt(2)
     dataset = flatten(dataset)
-    mean = tf.reduce_mean(dataset, axis=0)
-    absdiff = tf.abs(dataset - mean)
+    # mean = tf.reduce_mean(dataset, axis=0)
+    # absdiff = tf.abs(dataset - mean)
+    absdiff = tf.abs(dataset)
     absdiff = np.sort(absdiff, axis=0)
 
     peak_std = absdiff[int(len(absdiff) * prob)] / sigma
