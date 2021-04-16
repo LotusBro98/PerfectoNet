@@ -88,7 +88,7 @@ class Layer():
         for i in range(dataset.shape[-1]):
             print(f"\r{i} / {dataset.shape[-1]}", flush=True, end="")
             for j in range(dataset.shape[-1]):
-                nonzero = nz[:, i] & nz[:, j]
+                nonzero = nz[:, i] | nz[:, j]
 
                 if np.sum(nonzero) == 0:
                     cov[i, j] = 0
@@ -115,6 +115,8 @@ class Layer():
         plt.imshow(np.abs(V))
         plt.show()
 
+        x2 = np.matmul(x, V.T)
+
         # thresh = 0.3
         # rest = x2
         # take_channels = np.arange(x.shape[-1])
@@ -138,7 +140,7 @@ class Layer():
         # plt.plot(np.ones_like(nzc) * thresh)
         # plt.show()
 
-        thresh = 2 * self.eps
+        thresh = 1.5 * self.eps
         n_features = np.count_nonzero(np.sqrt(S) >= thresh)
         take_channels = np.argsort(np.sqrt(S))[::-1][:n_features]
 
@@ -148,14 +150,15 @@ class Layer():
 
         self.n_features = n_features
         self.K2 = np.take(V, take_channels, axis=0)
-        x2 = np.matmul(x, self.K2.T)
+        x2 = np.take(x2, take_channels, axis=-1)
         print("{} main channels, {} secondary".format(n_features, x.shape[-1] - n_features))
 
         # nz1 = (np.float32(np.abs(x) >= self.eps)) * 2 - 1
         nz1 = np.square(x)
         # nz2 = (np.float32(np.abs(x2) >= self.eps)) * 2 - 1
         x22 = np.matmul(x2, self.K2)
-        nz2 = np.concatenate([np.square(x2), np.square(x22)], axis=-1)
+        nz2 = np.concatenate([np.ones_like(x2[:,:1]), np.square(x2), np.square(x22)], axis=-1)
+        # nz2 = np.concatenate([np.ones_like(x2[:,:1]), x2, x22], axis=-1)
         K0 = np.linalg.lstsq(nz2, nz1, rcond=None)[0].T
         self.K0 = K0
 
@@ -169,7 +172,8 @@ class Layer():
     def _backward_2_order(self, x, batch_size=1):
         xb = tf.squeeze(tf.matmul(self.K2.T, tf.expand_dims(x, axis=-1)), axis=-1)
         # nz2 = (tf.cast(tf.abs(x) >= self.eps, tf.float32)) * 2 - 1
-        nz2 = tf.concat([tf.square(x), tf.square(xb)], axis=-1)
+        nz2 = tf.concat([tf.ones_like(x[:,:,:,:1]), tf.square(x), tf.square(xb)], axis=-1)
+        # nz2 = tf.concat([tf.ones_like(x[:,:,:,:1]), x, xb], axis=-1)
         nz = tf.squeeze(tf.matmul(self.K0, tf.expand_dims(nz2, axis=-1)), axis=-1)
         nz = tf.cast(nz > 0.5 * np.square(self.eps), tf.float32)
         xb = xb * nz
