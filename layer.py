@@ -82,9 +82,16 @@ class Layer():
 
         return x
 
-    def get_nonzero_cov(self, dataset):
+    def get_nonzero_cov(self, dataset, get_nonzero=False):
+        avg = np.average(dataset, axis=0)
+        dataset = dataset - avg
+
         cov = np.zeros((dataset.shape[-1], dataset.shape[-1]), dtype=np.float32)
-        nz = np.abs(dataset) > self.eps
+        if get_nonzero:
+            nz = np.abs(dataset) > self.eps
+        else:
+            nz = np.abs(dataset) >= 0
+
         for i in range(dataset.shape[-1]):
             print(f"\r{i} / {dataset.shape[-1]}", flush=True, end="")
             for j in range(dataset.shape[-1]):
@@ -105,78 +112,95 @@ class Layer():
         x = flatten(x)
         # self.channel_std = np.std(x, axis=0)
 
-        cov = self.get_nonzero_cov(x)
-        disp = np.stack([cov[i, i] for i in range(x.shape[-1])])
-        cor = cov / np.sqrt(np.outer(disp, disp))
-        plt.imshow(np.abs(cor))
+        # x2 = np.concatenate([np.stack([x[:, i] * x[:, j] for j in range(i+1)], axis=-1) for i in range(7)], axis=-1)
+        x2 = np.square(x)
+
+        cov1 = self.get_nonzero_cov(x, get_nonzero=True)
+        cov2 = self.get_nonzero_cov(x2)
+
+        U1, S1, V1 = np.linalg.svd(cov1)
+        U2, S2, V2 = np.linalg.svd(cov2)
+
+        plt.imshow(np.abs(V2))
         plt.show()
 
-        U, S, V = np.linalg.svd(cov)
-        plt.imshow(np.abs(V))
-        plt.show()
+        n_features = 10
+        n_features2 = 50
+        self.n_features = n_features
+        self.K2 = V2[:n_features2]
+        self.K1 = V1[:n_features]
+        self.m2 = np.average(x2)
 
-        x2 = np.matmul(x, V.T)
-
-        # thresh = 0.3
-        # rest = x2
-        # take_channels = np.arange(x.shape[-1])
-        # while len(rest) > (1 - thresh) * len(x):
-        #     nz = np.abs(rest) >= self.eps
-        #     nzc = np.count_nonzero(nz, axis=0)
-        #     drop_channel = np.argmin(nzc)
-        #     rest = rest[~nz[:, drop_channel]]
-        #     rest = np.delete(rest, drop_channel, axis=-1)
-        #     take_channels = np.delete(take_channels, drop_channel, axis=-1)
-        #     # plt.plot(np.sort(nzc)[::-1])
-        #     # plt.show()
-
-        # thresh = 0.1
-        # nz = np.abs(x2) >= self.eps
-        # nzc = np.average(nz, axis=0)
-        # n_features = np.count_nonzero(nzc >= thresh)
-        # take_channels = np.argsort(nzc)[::-1][:n_features]
+        # x2 = np.matmul(x, V.T)
         #
-        # plt.plot(np.sort(nzc)[::-1])
-        # plt.plot(np.ones_like(nzc) * thresh)
+        # # thresh = 0.3
+        # # rest = x2
+        # # take_channels = np.arange(x.shape[-1])
+        # # while len(rest) > (1 - thresh) * len(x):
+        # #     nz = np.abs(rest) >= self.eps
+        # #     nzc = np.count_nonzero(nz, axis=0)
+        # #     drop_channel = np.argmin(nzc)
+        # #     rest = rest[~nz[:, drop_channel]]
+        # #     rest = np.delete(rest, drop_channel, axis=-1)
+        # #     take_channels = np.delete(take_channels, drop_channel, axis=-1)
+        # #     # plt.plot(np.sort(nzc)[::-1])
+        # #     # plt.show()
+        #
+        # # thresh = 0.1
+        # # nz = np.abs(x2) >= self.eps
+        # # nzc = np.average(nz, axis=0)
+        # # n_features = np.count_nonzero(nzc >= thresh)
+        # # take_channels = np.argsort(nzc)[::-1][:n_features]
+        # #
+        # # plt.plot(np.sort(nzc)[::-1])
+        # # plt.plot(np.ones_like(nzc) * thresh)
+        # # plt.show()
+        #
+        # thresh = 1.5 * self.eps
+        # n_features = np.count_nonzero(np.sqrt(S) >= thresh)
+        # take_channels = np.argsort(np.sqrt(S))[::-1][:n_features]
+        #
+        # plt.plot(np.sqrt(S))
+        # plt.plot(np.ones_like(S) * thresh)
+        # plt.show()
+        #
+        # self.n_features = n_features
+        # self.K2 = np.take(V, take_channels, axis=0)
+        # x2 = np.take(x2, take_channels, axis=-1)
+        # print("{} main channels, {} secondary".format(n_features, x.shape[-1] - n_features))
+        #
+        # # nz1 = (np.float32(np.abs(x) >= self.eps)) * 2 - 1
+        # nz1 = np.square(x)
+        # # nz2 = (np.float32(np.abs(x2) >= self.eps)) * 2 - 1
+        # x22 = np.matmul(x2, self.K2)
+        # nz2 = np.concatenate([np.ones_like(x2[:,:1]), np.square(x2), np.square(x22)], axis=-1)
+        # # nz2 = np.concatenate([np.ones_like(x2[:,:1]), x2, x22], axis=-1)
+        # K0 = np.linalg.lstsq(nz2, nz1, rcond=None)[0].T
+        # self.K0 = K0
+        #
+        # plt.imshow(np.abs(K0))
         # plt.show()
 
-        thresh = 1.5 * self.eps
-        n_features = np.count_nonzero(np.sqrt(S) >= thresh)
-        take_channels = np.argsort(np.sqrt(S))[::-1][:n_features]
-
-        plt.plot(np.sqrt(S))
-        plt.plot(np.ones_like(S) * thresh)
-        plt.show()
-
-        self.n_features = n_features
-        self.K2 = np.take(V, take_channels, axis=0)
-        x2 = np.take(x2, take_channels, axis=-1)
-        print("{} main channels, {} secondary".format(n_features, x.shape[-1] - n_features))
-
-        # nz1 = (np.float32(np.abs(x) >= self.eps)) * 2 - 1
-        nz1 = np.square(x)
-        # nz2 = (np.float32(np.abs(x2) >= self.eps)) * 2 - 1
-        x22 = np.matmul(x2, self.K2)
-        nz2 = np.concatenate([np.ones_like(x2[:,:1]), np.square(x2), np.square(x22)], axis=-1)
-        # nz2 = np.concatenate([np.ones_like(x2[:,:1]), x2, x22], axis=-1)
-        K0 = np.linalg.lstsq(nz2, nz1, rcond=None)[0].T
-        self.K0 = K0
-
-        plt.imshow(np.abs(K0))
-        plt.show()
-
     def _forward_2_order(self, x, do_matmul=True, train=False, batch_size=8):
-        xf = tf.squeeze(tf.matmul(self.K2, tf.expand_dims(x, axis=-1)), axis=-1)
+        xf = tf.squeeze(tf.matmul(self.K1, tf.expand_dims(x, axis=-1)), axis=-1)
+        # xf = x[:,:,:,:self.n_features]
         return xf
 
     def _backward_2_order(self, x, batch_size=1):
-        xb = tf.squeeze(tf.matmul(self.K2.T, tf.expand_dims(x, axis=-1)), axis=-1)
-        # nz2 = (tf.cast(tf.abs(x) >= self.eps, tf.float32)) * 2 - 1
-        nz2 = tf.concat([tf.ones_like(x[:,:,:,:1]), tf.square(x), tf.square(xb)], axis=-1)
-        # nz2 = tf.concat([tf.ones_like(x[:,:,:,:1]), x, xb], axis=-1)
-        nz = tf.squeeze(tf.matmul(self.K0, tf.expand_dims(nz2, axis=-1)), axis=-1)
-        nz = tf.cast(nz > 0.5 * np.square(self.eps), tf.float32)
-        xb = xb * nz
+        x = tf.squeeze(tf.matmul(self.K1.T, tf.expand_dims(x, axis=-1)), axis=-1)
+        xs = tf.cast(x >= 0, tf.float32) * 2 - 1
+        x2 = tf.square(x) - self.m2
+        x2 = tf.squeeze(tf.matmul(self.K2, tf.expand_dims(x2, axis=-1)), axis=-1)
+        x2 = tf.squeeze(tf.matmul(self.K2.T, tf.expand_dims(x2, axis=-1)), axis=-1)
+        x2 = x2 + self.m2
+        xb = tf.sqrt(tf.abs(x2)) * xs
+        # # nz2 = (tf.cast(tf.abs(x) >= self.eps, tf.float32)) * 2 - 1
+        # nz2 = tf.concat([tf.ones_like(x[:,:,:,:1]), tf.square(x), tf.square(xb)], axis=-1)
+        # # nz2 = tf.concat([tf.ones_like(x[:,:,:,:1]), x, xb], axis=-1)
+        # nz = tf.squeeze(tf.matmul(self.K0, tf.expand_dims(nz2, axis=-1)), axis=-1)
+        # nz = tf.cast(nz > 0.5 * np.square(self.eps), tf.float32)
+        # xb = xb * nz
+        # xb = x
         return xb
 
     def forward(self, x, batch_size=1, do_2=True):
@@ -264,9 +288,10 @@ class Layer():
         np.save("saved/b_T{}".format(n), self.bias_backward)
         # np.save("saved/Km{}".format(n), self.Km)
         np.save("saved/K2{}".format(n), self.K2)
-        np.save("saved/K0{}".format(n), self.K0)
+        np.save("saved/K1{}".format(n), self.K1)
+        # np.save("saved/K0{}".format(n), self.K0)
         # np.save("saved/K2_T{}".format(n), self.K2_T)
-        # np.save("saved/m2{}".format(n), self.m2)
+        np.save("saved/m2{}".format(n), self.m2)
         # np.save("saved/std{}".format(n), self.channel_std)
         # np.save("saved/stdf{}".format(n), self.stdf)
         np.save("saved/in{}".format(n), self.input_shape)
@@ -281,9 +306,10 @@ class Layer():
         self.bias_backward = np.load("saved/b_T{}.npy".format(n))
         # self.Km = np.load("saved/Km{}.npy".format(n))
         self.K2 = np.load("saved/K2{}.npy".format(n))
-        self.K0 = np.load("saved/K0{}.npy".format(n))
+        self.K1 = np.load("saved/K1{}.npy".format(n))
+        # self.K0 = np.load("saved/K0{}.npy".format(n))
         # self.K2_T = np.load("saved/K2_T{}.npy".format(n))
-        # self.m2 = np.load("saved/m2{}.npy".format(n))
+        self.m2 = np.load("saved/m2{}.npy".format(n))
         # self.channel_std = np.load("saved/std{}.npy".format(n))
         # self.stdf = np.load("saved/stdf{}.npy".format(n))
         self.input_shape = np.load("saved/in{}.npy".format(n))
