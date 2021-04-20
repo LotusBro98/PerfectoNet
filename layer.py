@@ -131,20 +131,28 @@ class Layer():
         A = np.transpose(np.squeeze(np.asarray([[axx, axy], [axy, ayy]]), axis=-2), (2, 3, 4, 5, 0, 1))
         b = np.transpose(np.squeeze(np.asarray([bx, by]), axis=-2), (1, 2, 3, 4, 0))
         c = np.expand_dims(np.squeeze(c, axis=-2), axis=-1)
-        print(axx.shape)
 
         U, S, V = np.linalg.svd(A)
 
+        sU1 = np.expand_dims(np.float32(U[:, :, :, :, 0, 0] >= 0) * 2 - 1, axis=-1)
+        sU2 = np.expand_dims(np.float32(U[:, :, :, :, 1, 1] >= 0) * 2 - 1, axis=-1)
+        sV1 = np.expand_dims(np.float32(V[:, :, :, :, 0, 0] >= 0) * 2 - 1, axis=-1)
+        sV2 = np.expand_dims(np.float32(V[:, :, :, :, 1, 1] >= 0) * 2 - 1, axis=-1)
+
+        U[:, :, :, :, :, 0] *= sU1
+        U[:, :, :, :, :, 1] *= sU2
+        V[:, :, :, :, 0] *= sV1
+        V[:, :, :, :, 1] *= sV2
+        S[:, :, :, :, 0:1] *= sU1 * sV1
+        S[:, :, :, :, 1:2] *= sU2 * sV2
+
         cosf, sinf = np.split(V[:, :, :, :, :, 0], 2, axis=-1)
 
-        f = np.arctan2(sinf, cosf)
-        V = np.transpose(np.asarray([[np.cos(f[:, :, :, :, 0]), -np.sin(f[:, :, :, :, 0])],
-                                     [np.sin(f[:, :, :, :, 0]), np.cos(f[:, :, :, :, 0])]]), (2, 3, 4, 5, 0, 1))
+        f = np.arctan(sinf / cosf)
         V_T = np.transpose(V, (0, 1, 2, 3, 5, 4))
 
+        # b_ = b
         b_ = np.squeeze(np.matmul(V_T, np.expand_dims(b, axis=-1)), axis=-1)
-        S = np.matmul(V, np.matmul(A, V_T))
-        S = np.stack([S[:, :, :, :, 0, 0], S[:, :, :, :, 1, 1]], axis=-1)
 
         Sfbc = np.concatenate([S, f, b_, c], axis=-1)
         Sfbc = np.reshape(Sfbc, Sfbc.shape[:-2] + (Sfbc.shape[-2] * Sfbc.shape[-1],))
@@ -154,22 +162,26 @@ class Layer():
         Sfbc = np.reshape(Sfbc, Sfbc.shape[:-1] + (Sfbc.shape[-1] // 6, 6))
         S, f, b_, c = np.split(Sfbc, [2, 3, 5], axis=-1)
         f = np.squeeze(f, axis=-1)
+        sinf, cosf = np.sin(f), np.cos(f)
         c = np.squeeze(c, axis=-1)
         S = np.transpose(S, (4, 0, 1, 2, 3))
 
-        V = np.transpose(np.asarray([[np.cos(f), -np.sin(f)], [np.sin(f), np.cos(f)]]), (2, 3, 4, 5, 0, 1))
+        V = np.transpose(np.asarray([[cosf, -sinf], [sinf, cosf]]), (2, 3, 4, 5, 0, 1))
         U = np.transpose(V, (0, 1, 2, 3, 5, 4))
-        S = np.transpose(np.asarray([[S[0], np.zeros_like(S[0])], [np.zeros_like(S[0]), S[1]]], dtype='object'),
+        S = np.transpose(np.asarray([[S[0], np.zeros_like(S[0])], [np.zeros_like(S[0]), S[1]]]),
                          (2, 3, 4, 5, 0, 1))
         A = np.matmul(U, np.matmul(S, V))
         b = np.matmul(V, np.expand_dims(b_, axis=-1)).squeeze(axis=-1)
+        # b = b_
 
         Abc = np.stack(
             [A[:, :, :, :, 0, 0], A[:, :, :, :, 0, 1], A[:, :, :, :, 1, 1], b[:, :, :, :, 0], b[:, :, :, :, 1], c],
             axis=-2)
+
         A = self.get_ABC_mat()
 
         x = np.matmul(A, Abc)
+        print("sas21", x[0, 20, :5, 0])
         x = np.reshape(x, x.shape[:-2] + (x.shape[-2] * x.shape[-1],))
         return x
 
