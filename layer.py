@@ -76,175 +76,110 @@ class Layer():
         self.kernel_backward /= np.expand_dims(self.get_mask(), axis=(-1, -2))
         self.bias_backward /= np.expand_dims(self.get_mask(), axis=(-1, -2))
 
-        self.get_2_order_kernel(x)
-        print("Slice...")
-        x = self._forward_2_order(x, train=True)
-
         return x
 
-    def get_nonzero_cov(self, dataset, get_nonzero=False):
-        avg = np.average(dataset, axis=0)
-        dataset = dataset - avg
+    def get_ABC_mat(self, dx=1):
+        ksize = (3, 3)
+        stride = (2, 2)
 
-        cov = np.zeros((dataset.shape[-1], dataset.shape[-1]), dtype=np.float32)
-        if get_nonzero:
-            nz = np.abs(dataset) > self.eps
-        else:
-            nz = np.abs(dataset) >= 0
+        xy_m = np.ones((3, 3, 2), dtype=np.float32)
+        xy_m[:, :, 0] = np.expand_dims(np.linspace(-1, 1, 3), axis=1)
+        xy_m[:, :, 1] = np.expand_dims(np.linspace(-1, 1, 3), axis=0)
+        x = np.reshape(xy_m[:, :, 1], (3 * 3,)) * dx
+        y = np.reshape(xy_m[:, :, 0], (3 * 3,)) * dx
 
-        for i in range(dataset.shape[-1]):
-            print(f"\r{i} / {dataset.shape[-1]}", flush=True, end="")
-            for j in range(dataset.shape[-1]):
-                nonzero = nz[:, i] | nz[:, j]
+        A = np.vstack([x * x, 2 * x * y, y * y, x, y, np.ones_like(x)]).T
+        return A
 
-                if np.sum(nonzero) == 0:
-                    cov[i, j] = 0
-                    continue
+    def get_ABC_inv_mat(self, F, sigma=1, dx=1):
+        ksize = (3, 3)
+        stride = (2, 2)
 
-                xy = np.product(dataset[:, [i, j]][nonzero], axis=-1)
-                cov[i, j] = np.average(xy)
+        xy_m = np.ones((3, 3, 2), dtype=np.float32)
+        xy_m[:, :, 0] = np.expand_dims(np.linspace(-1, 1, 3), axis=1)
+        xy_m[:, :, 1] = np.expand_dims(np.linspace(-1, 1, 3), axis=0)
+        x = np.reshape(xy_m[:, :, 1], (3 * 3,)) * dx
+        y = np.reshape(xy_m[:, :, 0], (3 * 3,)) * dx
 
-        print()
+        A = np.vstack([x * x, 2 * x * y, y * y, x, y, np.ones_like(x)]).T
 
-        return cov
+        # w = np.expand_dims(np.exp(-0.5 * (x*x + y*y) / np.square(sigma)), axis=-1)
+        w = np.reshape(1 / self.get_mask(), (9, 1))
+        # w = 1
+        A = w * A
+        F = w * F
 
-    def get_2_order_kernel(self, x):
-        x = flatten(x)
-        # self.channel_std = np.std(x, axis=0)
+        F_1 = np.matmul(np.linalg.inv(np.matmul(A.T, A)), A.T)
+        ABC = np.matmul(F_1, F)
+        return ABC
 
-        # x2 = np.concatenate([np.stack([x[:, i] * x[:, j] for j in range(i+1)], axis=-1) for i in range(7)], axis=-1)
-        x2 = np.square(x)
+    def convolve(self, x):
+        ksize = (3, 3)
+        stride = (2, 2)
 
-        cov1 = self.get_nonzero_cov(x, get_nonzero=True)
-        cov2 = self.get_nonzero_cov(x2)
+        patches = tf.image.extract_patches(
+            x,
+            [1, ksize[0], ksize[1], 1],
+            [1, stride[0], stride[1], 1],
+            [1, 1, 1, 1], padding='VALID')
 
-        U1, S1, V1 = np.linalg.svd(cov1)
-        U2, S2, V2 = np.linalg.svd(cov2)
+        patches = np.reshape(patches, patches.shape[:3] + (ksize[0] * ksize[1], x.shape[-1]))
 
-        plt.imshow(np.abs(V2))
-        plt.show()
+        ABC = self.get_ABC_inv_mat(patches)
 
-        n_features = 10
-        n_features2 = 50
-        self.n_features = n_features
-        self.K2 = V2[:n_features2]
-        self.K1 = V1[:n_features]
-        self.m2 = np.average(x2)
+        axx, axy, ayy, bx, by, c = np.split(ABC, 6, axis=-2)
+        A = np.transpose(np.squeeze(np.asarray([[axx, axy], [axy, ayy]]), axis=-2), (2, 3, 4, 5, 0, 1))
+        b = np.transpose(np.squeeze(np.asarray([bx, by]), axis=-2), (1, 2, 3, 4, 0))
+        c = np.expand_dims(np.squeeze(c, axis=-2), axis=-1)
+        print(axx.shape)
 
-        # x2 = np.matmul(x, V.T)
-        #
-        # # thresh = 0.3
-        # # rest = x2
-        # # take_channels = np.arange(x.shape[-1])
-        # # while len(rest) > (1 - thresh) * len(x):
-        # #     nz = np.abs(rest) >= self.eps
-        # #     nzc = np.count_nonzero(nz, axis=0)
-        # #     drop_channel = np.argmin(nzc)
-        # #     rest = rest[~nz[:, drop_channel]]
-        # #     rest = np.delete(rest, drop_channel, axis=-1)
-        # #     take_channels = np.delete(take_channels, drop_channel, axis=-1)
-        # #     # plt.plot(np.sort(nzc)[::-1])
-        # #     # plt.show()
-        #
-        # # thresh = 0.1
-        # # nz = np.abs(x2) >= self.eps
-        # # nzc = np.average(nz, axis=0)
-        # # n_features = np.count_nonzero(nzc >= thresh)
-        # # take_channels = np.argsort(nzc)[::-1][:n_features]
-        # #
-        # # plt.plot(np.sort(nzc)[::-1])
-        # # plt.plot(np.ones_like(nzc) * thresh)
-        # # plt.show()
-        #
-        # thresh = 1.5 * self.eps
-        # n_features = np.count_nonzero(np.sqrt(S) >= thresh)
-        # take_channels = np.argsort(np.sqrt(S))[::-1][:n_features]
-        #
-        # plt.plot(np.sqrt(S))
-        # plt.plot(np.ones_like(S) * thresh)
-        # plt.show()
-        #
-        # self.n_features = n_features
-        # self.K2 = np.take(V, take_channels, axis=0)
-        # x2 = np.take(x2, take_channels, axis=-1)
-        # print("{} main channels, {} secondary".format(n_features, x.shape[-1] - n_features))
-        #
-        # # nz1 = (np.float32(np.abs(x) >= self.eps)) * 2 - 1
-        # nz1 = np.square(x)
-        # # nz2 = (np.float32(np.abs(x2) >= self.eps)) * 2 - 1
-        # x22 = np.matmul(x2, self.K2)
-        # nz2 = np.concatenate([np.ones_like(x2[:,:1]), np.square(x2), np.square(x22)], axis=-1)
-        # # nz2 = np.concatenate([np.ones_like(x2[:,:1]), x2, x22], axis=-1)
-        # K0 = np.linalg.lstsq(nz2, nz1, rcond=None)[0].T
-        # self.K0 = K0
-        #
-        # plt.imshow(np.abs(K0))
-        # plt.show()
+        U, S, V = np.linalg.svd(A)
 
-    def _forward_2_order(self, x, do_matmul=True, train=False, batch_size=8):
-        xf = tf.squeeze(tf.matmul(self.K1, tf.expand_dims(x, axis=-1)), axis=-1)
-        # xf = x[:,:,:,:self.n_features]
-        return xf
+        cosf, sinf = np.split(V[:, :, :, :, :, 0], 2, axis=-1)
 
-    def _backward_2_order(self, x, batch_size=1):
-        x = tf.squeeze(tf.matmul(self.K1.T, tf.expand_dims(x, axis=-1)), axis=-1)
-        xs = tf.cast(x >= 0, tf.float32) * 2 - 1
-        x2 = tf.square(x) - self.m2
-        x2 = tf.squeeze(tf.matmul(self.K2, tf.expand_dims(x2, axis=-1)), axis=-1)
-        x2 = tf.squeeze(tf.matmul(self.K2.T, tf.expand_dims(x2, axis=-1)), axis=-1)
-        x2 = x2 + self.m2
-        xb = tf.sqrt(tf.abs(x2)) * xs
-        # # nz2 = (tf.cast(tf.abs(x) >= self.eps, tf.float32)) * 2 - 1
-        # nz2 = tf.concat([tf.ones_like(x[:,:,:,:1]), tf.square(x), tf.square(xb)], axis=-1)
-        # # nz2 = tf.concat([tf.ones_like(x[:,:,:,:1]), x, xb], axis=-1)
-        # nz = tf.squeeze(tf.matmul(self.K0, tf.expand_dims(nz2, axis=-1)), axis=-1)
-        # nz = tf.cast(nz > 0.5 * np.square(self.eps), tf.float32)
-        # xb = xb * nz
-        # xb = x
-        return xb
+        f = np.arctan2(sinf, cosf)
+        V = np.transpose(np.asarray([[np.cos(f[:, :, :, :, 0]), -np.sin(f[:, :, :, :, 0])],
+                                     [np.sin(f[:, :, :, :, 0]), np.cos(f[:, :, :, :, 0])]]), (2, 3, 4, 5, 0, 1))
+        V_T = np.transpose(V, (0, 1, 2, 3, 5, 4))
+
+        b_ = np.squeeze(np.matmul(V_T, np.expand_dims(b, axis=-1)), axis=-1)
+        S = np.matmul(V, np.matmul(A, V_T))
+        S = np.stack([S[:, :, :, :, 0, 0], S[:, :, :, :, 1, 1]], axis=-1)
+
+        Sfbc = np.concatenate([S, f, b_, c], axis=-1)
+        Sfbc = np.reshape(Sfbc, Sfbc.shape[:-2] + (Sfbc.shape[-2] * Sfbc.shape[-1],))
+        return Sfbc
+
+    def deconvolve(self, Sfbc):
+        Sfbc = np.reshape(Sfbc, Sfbc.shape[:-1] + (Sfbc.shape[-1] // 6, 6))
+        S, f, b_, c = np.split(Sfbc, [2, 3, 5], axis=-1)
+        f = np.squeeze(f, axis=-1)
+        c = np.squeeze(c, axis=-1)
+        S = np.transpose(S, (4, 0, 1, 2, 3))
+
+        V = np.transpose(np.asarray([[np.cos(f), -np.sin(f)], [np.sin(f), np.cos(f)]]), (2, 3, 4, 5, 0, 1))
+        U = np.transpose(V, (0, 1, 2, 3, 5, 4))
+        S = np.transpose(np.asarray([[S[0], np.zeros_like(S[0])], [np.zeros_like(S[0]), S[1]]], dtype='object'),
+                         (2, 3, 4, 5, 0, 1))
+        A = np.matmul(U, np.matmul(S, V))
+        b = np.matmul(V, np.expand_dims(b_, axis=-1)).squeeze(axis=-1)
+
+        Abc = np.stack(
+            [A[:, :, :, :, 0, 0], A[:, :, :, :, 0, 1], A[:, :, :, :, 1, 1], b[:, :, :, :, 0], b[:, :, :, :, 1], c],
+            axis=-2)
+        A = self.get_ABC_mat()
+
+        x = np.matmul(A, Abc)
+        x = np.reshape(x, x.shape[:-2] + (x.shape[-2] * x.shape[-1],))
+        return x
 
     def forward(self, x, batch_size=1, do_2=True):
-        if self.orient == "both":
-            stride = (self.stride, self.stride)
-        elif self.orient == "hor":
-            stride = (1, self.stride)
-        elif self.orient == "ver":
-            stride = (self.stride, 1)
+        x = self.convolve(x)
 
-        x_conv = []
-        for i in range(0, x.shape[0], batch_size):
-            batch = x[i: i + batch_size]
-            batch = tf.nn.conv2d(
-                batch, self.kernel_forward,
-                (1, stride[0], stride[1], 1),
-                padding="VALID") + self.bias_forward
-            batch = batch.numpy()
-            x_conv.append(batch)
-        x = np.concatenate(x_conv, axis=0)
-
-        if do_2:
-            x = self._forward_2_order(x)
-
-        return x
-
-    def clip(self, x, reverse=False, train=False, back=False):
-        sigma = scipy.special.erfinv(1 - self.clip_loss) * np.sqrt(2)
-        if back:
-            # std = self.channel_std
-            # std = np.sqrt(np.sum(self.channel_std))
-            std = self.eps * sigma
-        else:
-            std = self.stdf * sigma
-        # std = self.eps * 5
-
-        x = x / std
-        # x = tf.clip_by_value(x, -1, 1)
-        x = x * std
         return x
 
     def backward(self, x, batch_size=1):
-
-        x = self._backward_2_order(x)
+        x = self.deconvolve(x)
 
         if self.orient == "both":
             stride = (self.stride, self.stride)
@@ -252,21 +187,26 @@ class Layer():
             stride = (1, self.stride)
         elif self.orient == "ver":
             stride = (self.stride, 1)
+
+        K_T = np.eye(x.shape[-1])
+        K_T = np.reshape(K_T, (3, 3, K_T.shape[0] // 9, x.shape[-1]))
+        K_T /= np.expand_dims(self.get_mask(), axis=(-1, -2))
 
         b, h, w, c = self.input_shape
         x_conv = []
         for i in range(0, x.shape[0], batch_size):
             batch0 = x[i: i + batch_size]
             batch = tf.nn.conv2d_transpose(
-                batch0, self.kernel_backward, (batch0.shape[0], h, w, c),
+                batch0, K_T, (batch0.shape[0], h, w, c),
                 (1, stride[0], stride[1], 1), padding="VALID")
-            bias = tf.nn.conv2d_transpose(
-                tf.ones_like(batch0[:,:,:,:1]), self.bias_backward, (batch0.shape[0], h, w, c),
-                (1, stride[0], stride[1], 1), padding="VALID")
-            batch += bias
+            # bias = tf.nn.conv2d_transpose(
+            #     tf.ones_like(batch0[:,:,:,:1]), self.bias_backward, (batch0.shape[0], h, w, c),
+            #     (1, stride[0], stride[1], 1), padding="VALID")
+            # batch += bias
             # batch = batch.numpy()
             x_conv.append(batch)
         x = np.concatenate(x_conv, axis=0)
+
         if self.ksize == 3 and self.stride == 2:
             if self.orient in ["both", "ver"]:
                 x[:, 0, :, :] *= 2
@@ -287,15 +227,13 @@ class Layer():
         np.save("saved/K_T{}".format(n), self.kernel_backward)
         np.save("saved/b_T{}".format(n), self.bias_backward)
         # np.save("saved/Km{}".format(n), self.Km)
-        np.save("saved/K2{}".format(n), self.K2)
-        np.save("saved/K1{}".format(n), self.K1)
-        # np.save("saved/K0{}".format(n), self.K0)
+        # np.save("saved/K2{}".format(n), self.K2)
         # np.save("saved/K2_T{}".format(n), self.K2_T)
-        np.save("saved/m2{}".format(n), self.m2)
+        # np.save("saved/m2{}".format(n), self.m2)
         # np.save("saved/std{}".format(n), self.channel_std)
         # np.save("saved/stdf{}".format(n), self.stdf)
         np.save("saved/in{}".format(n), self.input_shape)
-        np.save("saved/nc{}".format(n), self.n_features)
+        # np.save("saved/nc{}".format(n), self.n_features)
         # np.save("saved/xs{}".format(n), self.xs)
         # np.save("saved/ys{}".format(n), self.ys)
 
@@ -305,15 +243,13 @@ class Layer():
         self.kernel_backward = np.load("saved/K_T{}.npy".format(n))
         self.bias_backward = np.load("saved/b_T{}.npy".format(n))
         # self.Km = np.load("saved/Km{}.npy".format(n))
-        self.K2 = np.load("saved/K2{}.npy".format(n))
-        self.K1 = np.load("saved/K1{}.npy".format(n))
-        # self.K0 = np.load("saved/K0{}.npy".format(n))
+        # self.K2 = np.load("saved/K2{}.npy".format(n))
         # self.K2_T = np.load("saved/K2_T{}.npy".format(n))
-        self.m2 = np.load("saved/m2{}.npy".format(n))
+        # self.m2 = np.load("saved/m2{}.npy".format(n))
         # self.channel_std = np.load("saved/std{}.npy".format(n))
         # self.stdf = np.load("saved/stdf{}.npy".format(n))
         self.input_shape = np.load("saved/in{}.npy".format(n))
-        self.n_features = np.load("saved/nc{}.npy".format(n))
+        # self.n_features = np.load("saved/nc{}.npy".format(n))
         # self.xs = np.load("saved/xs{}.npy".format(n))
         # self.ys = np.load("saved/ys{}.npy".format(n))
 
