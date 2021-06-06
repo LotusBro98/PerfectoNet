@@ -12,7 +12,7 @@ TEST_SIZE = 2
 N_LAYERS = 2
 SKIP_LAYERS = 0
 
-EPS = [0.07, 0.07, 0.03, 0.03, 0.03, 0.05]
+EPS = [0.05, 0.05, 0.03, 0.03, 0.03, 0.05]
 # EPS = np.exp(np.linspace(np.log(0.05), np.log(1), N_LAYERS))
 # EPS = [0.15] * 6
 

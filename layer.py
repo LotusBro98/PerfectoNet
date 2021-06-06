@@ -62,135 +62,86 @@ class Layer():
     def fit(self, dataset, batch_size=1):
         x = dataset
 
+        y = self.convolve(x)
+
         self.input_shape = x.shape
 
-        K, K_T, bias_forward, bias_backward = self._get_optimal_conv_kernel(x)
+        K, K_T, bias_forward, bias_backward = self._get_optimal_conv_kernel(y)
         self.kernel_forward = K
         self.kernel_backward = K_T
         self.bias_forward = bias_forward
         self.bias_backward = bias_backward
 
-        print("Processing dataset ...")
-        x = self.forward(x, batch_size, do_2=False)
-
-        self.kernel_backward /= np.expand_dims(self.get_mask(), axis=(-1, -2))
-        self.bias_backward /= np.expand_dims(self.get_mask(), axis=(-1, -2))
+        x = self.forward(x, batch_size)
 
         return x
 
-    def get_ABC_mat(self, dx=1):
-        ksize = (3, 3)
-        stride = (2, 2)
+    def get_F_kernel(self):
+        k = np.float32([[0, 0], [0, 1], [1, 0], [1, 1], [1, -1]])
+        X = np.stack(np.mgrid[-1:2, -1:2], axis=-1)
+        kx = np.sum(k * np.expand_dims(X, axis=-2), axis=-1)
 
-        xy_m = np.ones((3, 3, 2), dtype=np.float32)
-        xy_m[:, :, 0] = np.expand_dims(np.linspace(-1, 1, 3), axis=1)
-        xy_m[:, :, 1] = np.expand_dims(np.linspace(-1, 1, 3), axis=0)
-        x = np.reshape(xy_m[:, :, 1], (3 * 3,)) * dx
-        y = np.reshape(xy_m[:, :, 0], (3 * 3,)) * dx
+        F = np.exp(2j * np.pi / 3 * kx)
+        F = np.concatenate([np.real(F), np.imag(F)[:, :, 1:]], axis=-1)
+        F = np.float32(F)
+        F[:,:,1:] *= np.sqrt(2)
 
-        A = np.vstack([x * x, 2 * x * y, y * y, x, y, np.ones_like(x)]).T
-        return A
-
-    def get_ABC_inv_mat(self, F, sigma=1, dx=1):
-        ksize = (3, 3)
-        stride = (2, 2)
-
-        xy_m = np.ones((3, 3, 2), dtype=np.float32)
-        xy_m[:, :, 0] = np.expand_dims(np.linspace(-1, 1, 3), axis=1)
-        xy_m[:, :, 1] = np.expand_dims(np.linspace(-1, 1, 3), axis=0)
-        x = np.reshape(xy_m[:, :, 1], (3 * 3,)) * dx
-        y = np.reshape(xy_m[:, :, 0], (3 * 3,)) * dx
-
-        A = np.vstack([x * x, 2 * x * y, y * y, x, y, np.ones_like(x)]).T
-
-        # w = np.expand_dims(np.exp(-0.5 * (x*x + y*y) / np.square(sigma)), axis=-1)
-        w = np.reshape(1 / self.get_mask(), (9, 1))
-        # w = 1
-        A = w * A
-        F = w * F
-
-        F_1 = np.matmul(np.linalg.inv(np.matmul(A.T, A)), A.T)
-        ABC = np.matmul(F_1, F)
-        return ABC
+        return F
 
     def convolve(self, x):
-        ksize = (3, 3)
-        stride = (2, 2)
+        Cin = x.shape[-1]
 
-        patches = tf.image.extract_patches(
-            x,
-            [1, ksize[0], ksize[1], 1],
-            [1, stride[0], stride[1], 1],
-            [1, 1, 1, 1], padding='VALID')
+        F = self.get_F_kernel()
+        F = tf.math.conj(F) / 9
 
-        patches = np.reshape(patches, patches.shape[:3] + (ksize[0] * ksize[1], x.shape[-1]))
+        F = np.stack([F] * Cin, axis=-2)
 
-        ABC = self.get_ABC_inv_mat(patches)
+        y = tf.nn.depthwise_conv2d(x, F, strides=(1, 2, 2, 1), padding='VALID')
+        y = tf.reshape(y, y.shape[:-1] + (Cin, 9))
+        y0 = y[:,:,:,:,:1]
+        y1 = y[:,:,:,:,1:5]
+        y2 = y[:,:,:,:,5:]
 
-        axx, axy, ayy, bx, by, c = np.split(ABC, 6, axis=-2)
-        A = np.transpose(np.squeeze(np.asarray([[axx, axy], [axy, ayy]]), axis=-2), (2, 3, 4, 5, 0, 1))
-        b = np.transpose(np.squeeze(np.asarray([bx, by]), axis=-2), (1, 2, 3, 4, 0))
-        c = np.expand_dims(np.squeeze(c, axis=-2), axis=-1)
+        y_abs = tf.sqrt(tf.square(y1) + tf.square(y2)) * tf.sign(y2)
+        y_ang = tf.math.atan2(y1, tf.abs(y2)) / (np.pi / 2)
 
-        U, S, V = np.linalg.svd(A)
+        y = tf.concat([y0, y_abs, y_ang], axis=-1)
 
-        sU1 = np.expand_dims(np.float32(U[:, :, :, :, 0, 0] >= 0) * 2 - 1, axis=-1)
-        sU2 = np.expand_dims(np.float32(U[:, :, :, :, 1, 1] >= 0) * 2 - 1, axis=-1)
-        sV1 = np.expand_dims(np.float32(V[:, :, :, :, 0, 0] >= 0) * 2 - 1, axis=-1)
-        sV2 = np.expand_dims(np.float32(V[:, :, :, :, 1, 1] >= 0) * 2 - 1, axis=-1)
+        y = tf.reshape(y, y.shape[:-2] + (Cin * 9))
 
-        U[:, :, :, :, :, 0] *= sU1
-        U[:, :, :, :, :, 1] *= sU2
-        V[:, :, :, :, 0] *= sV1
-        V[:, :, :, :, 1] *= sV2
-        S[:, :, :, :, 0:1] *= sU1 * sV1
-        S[:, :, :, :, 1:2] *= sU2 * sV2
+        return y
 
-        cosf, sinf = np.split(V[:, :, :, :, :, 0], 2, axis=-1)
+    def deconvolve(self, y):
+        Cin = y.shape[-1] // 9
 
-        f = np.arctan(sinf / cosf)
-        V_T = np.transpose(V, (0, 1, 2, 3, 5, 4))
+        y = tf.reshape(y, y.shape[:-1] + (Cin, 9))
+        y0 = y[:, :, :, :, :1]
+        y_abs = y[:, :, :, :, 1:5]
+        y_ang = y[:, :, :, :, 5:] * (np.pi / 2)
 
-        # b_ = b
-        b_ = np.squeeze(np.matmul(V_T, np.expand_dims(b, axis=-1)), axis=-1)
+        y1 = tf.abs(y_abs) * tf.sin(y_ang)
+        y2 = y_abs * tf.cos(y_ang)
 
-        Sfbc = np.concatenate([S, f, b_, c], axis=-1)
-        Sfbc = np.reshape(Sfbc, Sfbc.shape[:-2] + (Sfbc.shape[-2] * Sfbc.shape[-1],))
-        return Sfbc
+        y = tf.concat([y0, y1, y2], axis=-1)
 
-    def deconvolve(self, Sfbc):
-        Sfbc = np.reshape(Sfbc, Sfbc.shape[:-1] + (Sfbc.shape[-1] // 6, 6))
-        S, f, b_, c = np.split(Sfbc, [2, 3, 5], axis=-1)
-        f = np.squeeze(f, axis=-1)
-        sinf, cosf = np.sin(f), np.cos(f)
-        c = np.squeeze(c, axis=-1)
-        S = np.transpose(S, (4, 0, 1, 2, 3))
+        F = self.get_F_kernel()
 
-        V = np.transpose(np.asarray([[cosf, -sinf], [sinf, cosf]]), (2, 3, 4, 5, 0, 1))
-        U = np.transpose(V, (0, 1, 2, 3, 5, 4))
-        S = np.transpose(np.asarray([[S[0], np.zeros_like(S[0])], [np.zeros_like(S[0]), S[1]]]),
-                         (2, 3, 4, 5, 0, 1))
-        A = np.matmul(U, np.matmul(S, V))
-        b = np.matmul(V, np.expand_dims(b_, axis=-1)).squeeze(axis=-1)
-        # b = b_
+        y = tf.reduce_sum(tf.expand_dims(tf.expand_dims(y, axis=-2), axis=-2) * F, axis=-1)
+        y = tf.transpose(y, (0, 1, 2, 4, 5, 3))
+        y = tf.reshape(y, y.shape[:-3] + (Cin * 9))
 
-        Abc = np.stack(
-            [A[:, :, :, :, 0, 0], A[:, :, :, :, 0, 1], A[:, :, :, :, 1, 1], b[:, :, :, :, 0], b[:, :, :, :, 1], c],
-            axis=-2)
-
-        A = self.get_ABC_mat()
-
-        x = np.matmul(A, Abc)
-        print("sas21", x[0, 20, :5, 0])
-        x = np.reshape(x, x.shape[:-2] + (x.shape[-2] * x.shape[-1],))
-        return x
+        return y
 
     def forward(self, x, batch_size=1, do_2=True):
         x = self.convolve(x)
 
+        x = tf.squeeze(tf.matmul(self.kernel_forward, tf.expand_dims(x, axis=-1))) + self.bias_forward
+
         return x
 
     def backward(self, x, batch_size=1):
+        x = tf.squeeze(tf.matmul(self.kernel_backward, tf.expand_dims(x, axis=-1))) + self.bias_backward
+
         x = self.deconvolve(x)
 
         if self.orient == "both":
@@ -265,98 +216,39 @@ class Layer():
         # self.xs = np.load("saved/xs{}.npy".format(n))
         # self.ys = np.load("saved/ys{}.npy".format(n))
 
-    def _get_optimal_conv_kernel(self, dataset, batch_size_cells=100000000):
-        assert self.ksize in [1, 2, 3]
-        assert self.stride in [1, 2]
-        assert self.orient in ["both", "hor", "ver"]
-
-        if self.orient == "both":
-            ksize = (self.ksize, self.ksize)
-            stride = (self.stride, self.stride)
-        elif self.orient == "hor":
-            ksize = (1, self.ksize)
-            stride = (1, self.stride)
-        elif self.orient == "ver":
-            ksize = (self.ksize, 1)
-            stride = (self.stride, 1)
-
-        Cin = dataset.shape[-1]
-        if self.orient == "both":
-            cells = dataset.shape[1] * dataset.shape[2] * np.square(dataset.shape[3])
-        else:
-            cells = dataset.shape[1] * dataset.shape[2] * dataset.shape[3]
-        batch_size_images = math.ceil(batch_size_cells / (cells))
-
-        std = np.std(dataset)
-
-        N = 0
-        mean_p = 0
-        for i in range(0, dataset.shape[0], batch_size_images):
-            batch = dataset[i: i + batch_size_images]
-            patches = tf.image.extract_patches(
-                batch,
-                [1, ksize[0], ksize[1], 1],
-                [1, stride[0], stride[1], 1],
-                [1, 1, 1, 1], padding='VALID')
-            patches = tf.reshape(patches, [patches.shape[0] * patches.shape[1] * patches.shape[2], patches.shape[3]])
-
-            mean_p += tf.reduce_sum(patches, axis=0)
-            N += patches.shape[0]
-        mean_p /= N
+    def _get_optimal_conv_kernel(self, dataset, batch_size_images=16):
+        mean = np.average(dataset, axis=(0, 1, 2))
 
         N = 0
         M = 0
-        std_p = 0
         for i in range(0, dataset.shape[0], batch_size_images):
             batch = dataset[i: i + batch_size_images]
-            patches = tf.image.extract_patches(
-                batch,
-                [1, ksize[0], ksize[1], 1],
-                [1, stride[0], stride[1], 1],
-                [1, 1, 1, 1], padding='VALID')
-            patches = tf.reshape(patches, [patches.shape[0] * patches.shape[1] * patches.shape[2], patches.shape[3]])
-            patches = patches - mean_p
-            std_p += tf.reduce_sum(tf.square(patches), axis=0)
+            batch = tf.reshape(batch, [batch.shape[0] * batch.shape[1] * batch.shape[2], batch.shape[3]])
+            cov = tf.matmul(tf.expand_dims(batch, axis=-1), tf.expand_dims(batch, axis=-2))
+            cov = tf.reduce_sum(cov, axis=0)
 
-            batch_size_mat = math.ceil(batch_size_cells / (patches.shape[1] * patches.shape[1]))
-            for j in range(0, len(patches), batch_size_mat):
-                batch_mat = patches[j:j + batch_size_mat]
-                cov = tf.matmul(tf.expand_dims(batch_mat, axis=-1), tf.expand_dims(batch_mat, axis=-2))
-                cov = tf.reduce_sum(cov, axis=0)
-
-                N += batch_mat.shape[0]
-                M += cov
+            N += batch.shape[0]
+            M += cov
 
             print("\rProcessing sample {} / {}".format(i, dataset.shape[0]), end='')
         print()
-
         M = M / N
-        std_p = tf.sqrt(std_p / N)
-        # M = M / np.outer(std_p, std_p)
+
         print("SV Decomposition running...")
         U, S, V = np.linalg.svd(M, full_matrices=False)
 
-        mask = self.get_mask()
+        n_samples = np.sum(np.sqrt(S) > self.eps)
+
+        plt.plot(np.sqrt(S))
+        plt.plot(np.ones_like(S) * self.eps)
+        plt.show()
+
+        V = V[:n_samples]
 
         K = V
-        if self.equalize:
-            K = np.matmul(np.diag(1/np.sqrt(S / np.average(S)) / std), K)
-        else:
-            K = K / ((np.count_nonzero(mask) / np.sum(1 / mask)))
-        bias_forward = -tf.squeeze(tf.matmul(K, tf.expand_dims(mean_p, axis=-1)))
-        K = tf.reshape(K, (V.shape[0], ksize[0], ksize[1], Cin))
-        K = tf.transpose(K, (1, 2, 3, 0))
+        bias_forward = -tf.squeeze(tf.matmul(K, tf.expand_dims(mean, axis=-1)))
 
-        K_T = U
-        if self.equalize:
-            K_T = np.matmul(K_T, np.diag(np.sqrt(S / np.average(S)) * std))
-        else:
-            K_T = K_T * ((np.count_nonzero(mask) / np.sum(1 / mask)))
-        bias_backward = mean_p
-        bias_backward = tf.reshape(bias_backward, (ksize[0], ksize[1], Cin, 1))
-        # bias_backward /= np.expand_dims(mask, axis=(-1, -2))
-        K_T = tf.reshape(K_T, (ksize[0], ksize[1], Cin, V.shape[0]))
-        K_T = tf.transpose(K_T, (0, 1, 2, 3))
-        # K_T /= np.expand_dims(mask, axis=(-1, -2))
+        K_T = V.T
+        bias_backward = mean
 
         return K, K_T, bias_forward, bias_backward
