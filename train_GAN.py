@@ -10,8 +10,9 @@ from layer import Layer
 from model import Model
 
 SIZE = 63
-DATASET_SIZE = 1000
+DATASET_SIZE = 100
 BATCH_SIZE = 1
+LEARNING_RATE = 1e-4
 
 N_LAYERS = 1
 
@@ -62,10 +63,10 @@ model.fit(images, batch_size=BATCH_SIZE)
 
 ################ CNN models ######################
 
-def DownBlock(Cout, use_batchnorm=True, strides=2):
+def DownBlock(Cout, use_batchnorm=True, size=3, strides=2):
     initializer = tf.random_normal_initializer(0., 0.02)
     block = tf.keras.Sequential()
-    block.add(tf.keras.layers.Conv2D(Cout, 3, strides=strides, padding='valid', use_bias=False, kernel_initializer=initializer))
+    block.add(tf.keras.layers.Conv2D(Cout, size, strides=strides, padding='valid', use_bias=False, kernel_initializer=initializer))
     if use_batchnorm:
         block.add(tf.keras.layers.BatchNormalization())
     block.add(tf.keras.layers.LeakyReLU())
@@ -95,16 +96,16 @@ def Generator():
         DownBlock(256),
         DownBlock(512),
         DownBlock(512),
-        DownBlock(512),
+        # DownBlock(512),
     ]
 
     up_stack = [
-        UpBlock(512, use_dropout=True),
+        # UpBlock(512, use_dropout=True),
         UpBlock(512, use_dropout=True),
         UpBlock(256),
         UpBlock(128),
         UpBlock(64),
-        UpBlock(32),
+        UpBlock(3),
     ]
 
     skips = []
@@ -118,7 +119,10 @@ def Generator():
     for x1, up in zip(skips, up_stack):
         x = up(x)
         print(x.shape, x1.shape)
-        x = tf.concat([x, x1], axis=-1)
+        x = x + x1
+        # x = tf.concat([x, x1], axis=-1)
+        x = DownBlock(x1.shape[-1], size=1, strides=1)(x)
+        print(x.shape)
 
     initializer = tf.random_normal_initializer(0., 0.02)
     x = tf.keras.layers.Conv2D(3, (3, 3), activation='sigmoid', padding='same', kernel_initializer=initializer)(x)
@@ -168,8 +172,8 @@ def generator_loss(enc_gen_input, enc_gen_output, disc_gen_output):
     Lg = loss_object(tf.ones_like(disc_gen_output), disc_gen_output)
     L1 = tf.reduce_mean(L1)
     Lg = tf.reduce_mean(Lg)
-    return 1*L1 + Lg
-    # return Lg
+    # return 1*L1 + Lg
+    return Lg
 
 def discriminator_loss(disc_gen_output, disc_real_output):
     Lt = loss_object(tf.ones_like(disc_real_output), disc_real_output)
@@ -178,8 +182,8 @@ def discriminator_loss(disc_gen_output, disc_real_output):
 
 ############# Train #####################
 
-generator_optimizer = tf.keras.optimizers.Adam(1e-3)
-discriminator_optimizer = tf.keras.optimizers.Adam(1e-3)
+generator_optimizer = tf.keras.optimizers.Adam(LEARNING_RATE)
+discriminator_optimizer = tf.keras.optimizers.Adam(LEARNING_RATE)
 
 @tf.function
 def train_step(xA, xB):
