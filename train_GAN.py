@@ -22,6 +22,7 @@ EPS = [-1.5] * N_LAYERS
 def load_image(filename, image_size=512):
     image = tf.io.decode_image(tf.io.read_file(filename), channels=3)
     image = image / 255
+    image = image * 2 - 1
     image.set_shape((image_size, image_size, 3))
     image = tf.image.resize(image, (SIZE, SIZE))
 
@@ -66,7 +67,14 @@ model.fit(images, batch_size=BATCH_SIZE)
 def DownBlock(Cout, use_batchnorm=True, size=3, strides=2):
     initializer = tf.random_normal_initializer(0., 0.02)
     block = tf.keras.Sequential()
-    block.add(tf.keras.layers.Conv2D(Cout, size, strides=strides, padding='valid', use_bias=False, kernel_initializer=initializer))
+    block.add(tf.keras.layers.Conv2D(
+        filters=Cout,
+        kernel_size=size,
+        strides=strides,
+        padding='same' if strides == 1 else 'valid',
+        use_bias=False,
+        kernel_initializer=initializer
+    ))
     if use_batchnorm:
         block.add(tf.keras.layers.BatchNormalization())
     block.add(tf.keras.layers.LeakyReLU())
@@ -75,7 +83,14 @@ def DownBlock(Cout, use_batchnorm=True, size=3, strides=2):
 def UpBlock(Cout, use_dropout=False):
     initializer = tf.random_normal_initializer(0., 0.02)
     block = tf.keras.Sequential()
-    block.add(tf.keras.layers.Conv2DTranspose(Cout, 3, strides=2, padding='valid', use_bias=False, kernel_initializer=initializer))
+    block.add(tf.keras.layers.Conv2DTranspose(
+        filters=Cout,
+        kernel_size=3,
+        strides=2,
+        padding='valid',
+        use_bias=False,
+        kernel_initializer=initializer
+    ))
     block.add(tf.keras.layers.BatchNormalization())
     if use_dropout:
         block.add(tf.keras.layers.Dropout(0.5))
@@ -94,14 +109,14 @@ def Generator():
         DownBlock(64, use_batchnorm=False),
         DownBlock(128),
         DownBlock(256),
-        DownBlock(512),
-        DownBlock(512),
-        # DownBlock(512),
+        DownBlock(256),
+        DownBlock(256),
+        # DownBlock(256),
     ]
 
     up_stack = [
-        # UpBlock(512, use_dropout=True),
-        UpBlock(512, use_dropout=True),
+        # UpBlock(256, use_dropout=True),
+        UpBlock(256, use_dropout=True),
         UpBlock(256),
         UpBlock(128),
         UpBlock(64),
@@ -119,13 +134,14 @@ def Generator():
     for x1, up in zip(skips, up_stack):
         x = up(x)
         print(x.shape, x1.shape)
-        x = x + x1
-        # x = tf.concat([x, x1], axis=-1)
-        x = DownBlock(x1.shape[-1], size=1, strides=1)(x)
+        # x1 = DownBlock(x1.shape[-1], size=1, strides=1)(x1)
+        # x = x + x1
+        x = tf.concat([x, x1], axis=-1)
+        x = DownBlock(x1.shape[-1], size=3, strides=1)(x)
         print(x.shape)
 
     initializer = tf.random_normal_initializer(0., 0.02)
-    x = tf.keras.layers.Conv2D(3, (3, 3), activation='sigmoid', padding='same', kernel_initializer=initializer)(x)
+    x = tf.keras.layers.Conv2D(3, (3, 3), activation='tanh', padding='same', kernel_initializer=initializer)(x)
     print(x.shape)
 
     return tf.keras.Model(inputs=inp, outputs=x)
@@ -144,8 +160,8 @@ def Discriminator():
     down_stack = [
         DownBlock(64, use_batchnorm=False),
         DownBlock(128),
-        DownBlock(256),
-        DownBlock(512, strides=1),
+        # DownBlock(256),
+        DownBlock(256, strides=1),
         # DownBlock(512),
         # DownBlock(512),
     ]
@@ -219,10 +235,11 @@ def train(datasetA, datasetB, epochs, batch_size=BATCH_SIZE):
         print ('\rTime for epoch {} is {} sec. Lg {}, Ld {}'.format(epoch + 1, time.time()-start, gen_loss, disc_loss), end='', flush=True)
 
         if epoch % 10 == 0:
-            x = generator(datasetA[0], training=True)
+            ind = random.randint(0, datasetA.shape[0] - 1)
+            x = generator(datasetA[ind], training=True)
             f, ax = plt.subplots(1, 2, figsize=(20, 10))
-            ax[0].imshow(datasetA[0, 0])
-            ax[1].imshow(x[0])
+            ax[0].imshow(datasetA[ind, 0] * 0.5 + 0.5)
+            ax[1].imshow(x[0] * 0.5 + 0.5)
             plt.show()
 
 train(imagesB, imagesA, 100000)
