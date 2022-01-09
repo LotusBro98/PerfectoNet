@@ -10,11 +10,11 @@ from layer import Layer
 from model import Model
 
 SIZE = 63
-DATASET_SIZE = 100
+DATASET_SIZE = 200
 BATCH_SIZE = 1
 LEARNING_RATE = 1e-4
 
-N_LAYERS = 1
+N_LAYERS = 5
 
 EPS = [-1.5] * N_LAYERS
 
@@ -188,8 +188,8 @@ def generator_loss(enc_gen_input, enc_gen_output, disc_gen_output):
     Lg = loss_object(tf.ones_like(disc_gen_output), disc_gen_output)
     L1 = tf.reduce_mean(L1)
     Lg = tf.reduce_mean(Lg)
-    # return 1*L1 + Lg
-    return Lg
+    return 0.01*L1 + Lg
+    # return Lg
 
 def discriminator_loss(disc_gen_output, disc_real_output):
     Lt = loss_object(tf.ones_like(disc_real_output), disc_real_output)
